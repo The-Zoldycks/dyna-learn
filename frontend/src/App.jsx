@@ -380,12 +380,17 @@ export default function App() {
     <div className="flex flex-col h-screen bg-gradient-to-br from-slate-50 to-indigo-50 text-slate-900">
       {/* Header with branded logo */}
       <header className="flex items-center justify-between px-4 sm:px-6 py-3 bg-white border-b border-slate-200 shadow-sm shrink-0">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
+          <img
+            src="/dyna-learn-doc-icon.png"
+            alt="Dyna-learn doc"
+            className="w-14 h-14 object-contain rounded-full border-2 border-slate-900 shadow-sm shrink-0"
+          />
           <img
             src="/dyna-learn-logo-blue.png"
             alt="Dyna-learn logo"
-            className="h-10 object-contain contrast-125 saturate-150 brightness-[0.97] drop-shadow-[0_1px_2px_rgba(0,0,0,0.12)]"
-            style={{ filter: "contrast(1.35) saturate(1.2)" }}
+            className="h-14 object-contain contrast-125 saturate-150 brightness-[0.97] drop-shadow-[0_2px_4px_rgba(0,0,0,0.18)]"
+            style={{ filter: "contrast(1.45) saturate(1.25) brightness(0.95)" }}
           />
           <div className="hidden sm:block border-l border-slate-200 pl-3 ml-1">
             <h1 className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase leading-none">Interactive AI Tutor</h1>
