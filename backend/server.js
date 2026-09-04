@@ -268,9 +268,16 @@ Rules:
     res.json(parsed);
   } catch (error) {
     console.error("Error in /api/tutor:", error);
-    res.status(500).json({
+    const msg = error.message || "";
+    let code = "TUTOR_ERROR";
+    if (msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.includes("quota")) code = "GEMINI_RATE_LIMIT";
+    else if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.toLowerCase().includes("high demand")) code = "GEMINI_UNAVAILABLE";
+    else if (msg.includes("404") || msg.includes("NOT_FOUND")) code = "GEMINI_MODEL_NOT_FOUND";
+    else if (msg.includes("401") || msg.includes("API key")) code = "GEMINI_AUTH_ERROR";
+    res.status(code === "GEMINI_RATE_LIMIT" ? 429 : 500).json({
       error: "Failed to generate tutor response",
-      details: error.message,
+      details: msg,
+      code,
     });
   }
 });

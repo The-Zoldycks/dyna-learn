@@ -50,8 +50,21 @@ POST /api/tutor
 ```
 Response enforced via responseMimeType: application/json + responseSchema.
 
-## Frontend Actions
-- add_nodes: append nodes (and optional edges)
-- add_edges: append edges
-- update_nodes: merge by id, highlight:true => red border
-- clear_canvas: reset to initialNodes
+## Frontend Actions & update_nodes Highlight UI
+
+| Action | Payload Example | UI Effect (dagre + CustomNode) | When LLM Uses It |
+|---|---|---|---|
+| `add_nodes` | `{"nodes":[{"id":"planning","label":"Planning","icon":"clipboard","shape":"rectangle"}],"edges":[{"id":"e1","source":"planning","target":"design"}]}` | Appends nodes + edges, auto-layout via dagre TB grid, smoothstep edges | New concepts |
+| `add_edges` | `{"edges":[{"id":"e1","source":"a","target":"b","label":"powers"}]}` | Appends smoothstep connections only | Linking existing nodes |
+| `update_nodes` | `{"nodes":[{"id":"testing","highlight":true,"icon":"bug"}]}` | Red `bg-red-50 border-red-500` pulse + dot, tooltip “Highlighted — confusion detected”, no relayout (preserves positions), hover explanation; legend appears when any highlighted | Student confusion matched to `selectedNodeId` (see `server.js:115` `highlight:true`). Auto-fitView to highlighted node when present. |
+| `clear_canvas` | `{"nodes":[]}` | Resets to welcome pill `start`, toasts “Canvas cleared” | User clear or topic pivot |
+| `none` | `{"nodes":[]}` | No canvas change, drawer still shows speech | Off-topic redirect |
+
+> Highlight docs: `backend/server.js:115` `highlight:boolean` — frontend maps via `CustomNode.jsx:34`. Use `icon` from 20-value broad library (`clipboard/palette/code/bug/rocket/wrench/database/server/cloud/lock/file/user/layers/cog/shield/book/lightbulb/network/cpu/brain`) — fallback heuristic `inferIcon()` covers 90% CS concepts. Dagre strips `position`; LLM must not guess x/y.
+
+## UX Polish
+
+- **Toasts (sonner):** `frontend/src/main.jsx:9` `<Toaster bottom-right>`. Success (Canvas cleared) auto-dismiss 3.5s; LLM errors (429/503/500) sticky `duration: Infinity` with `Retry` action that replays exact `payload` (no stale closure) + `Dismiss`.
+- **Loading:** Chat-only `ChatSkeleton` (`components/ChatSkeleton.jsx`) pulses in left panel while `loading`; canvas stays interactive (pan/zoom) with subtle corner spinner `top-3 left-3` — no overlay.
+- **Icons:** All nodes use `CustomNode` presets `rectangle/pill/diamond/circle` + lucide icons; highlight red overrides selection violet.
+- **Error handling:** Backend returns `{code}` (`GEMINI_RATE_LIMIT` 429 etc.) mapped to toast descriptions.

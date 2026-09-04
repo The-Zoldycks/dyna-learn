@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -13,8 +13,10 @@ import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   Pause, Play, Square, ChevronDown, ChevronUp, Maximize2, X
 } from "lucide-react";
+import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
 import ExplanationDrawer from "./components/ExplanationDrawer.jsx";
+import ChatSkeleton from "./components/ChatSkeleton.jsx";
 import { getLayoutedElements } from "./utils/layout.js";
 
 const nodeTypes = { custom: CustomNode };
@@ -44,6 +46,7 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerText, setDrawerText] = useState("");
   const [expandedIds, setExpandedIds] = useState(new Set());
+  const lastPayloadRef = useRef(null);
 
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, type: "smoothstep", animated: false }, eds)), [setEdges]);
   const onNodeClick = useCallback((_, node) => setSelectedNodeId(node.id), []);
@@ -321,20 +324,22 @@ export default function App() {
     return applyDiagramUpdate(update);
   }, [applyDiagramUpdate, formatNodes, formatEdges, setNodes, setEdges]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!question.trim() || loading) return;
+  // Core executor — takes explicit payload to avoid stale closure on retry (sonner action captures payload directly)
+  const executeTutor = useCallback(async (payload, retryLabel) => {
     setLoading(true);
     setError("");
-    const canvasState = { nodes, edges };
-    const payload = { studentQuestion: question, canvasState, flowchartState: canvasState, chatHistory, selectedNodeId };
+    lastPayloadRef.current = payload;
     try {
       const res = await fetch("http://localhost:3000/api/tutor", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || errData.details || `HTTP ${res.status}`);
+        const code = errData.code || "";
+        let msg = errData.error || errData.details || `HTTP ${res.status}`;
+        if (code === "GEMINI_RATE_LIMIT") msg = "Gemini free-tier rate limit hit — wait ~20s and retry.";
+        if (code === "GEMINI_UNAVAILABLE") msg = "Gemini is under high demand — please retry.";
+        throw Object.assign(new Error(msg), { code, payload });
       }
       const data = await res.json();
       const { speech_text, diagram_update } = data;
@@ -342,21 +347,52 @@ export default function App() {
         speakText(speech_text);
         setDrawerText(speech_text);
         setDrawerOpen(true);
+        const userText = payload.studentQuestion;
         setChatHistory((prev) => {
-          const next = [...prev, { role: "user", text: question }, { role: "model", text: speech_text }];
+          const next = [...prev, { role: "user", text: userText }, { role: "model", text: speech_text }];
           return next.slice(-6);
         });
       } else {
-        setChatHistory((prev) => [...prev, { role: "user", text: question }].slice(-6));
+        setChatHistory((prev) => [...prev, { role: "user", text: payload.studentQuestion }].slice(-6));
       }
-      if (diagram_update) applyDiagramUpdateStable(diagram_update);
-      setQuestion("");
+      if (diagram_update) applyDiagramUpdateStable(diagramUpdate);
+      if (retryLabel) toast.dismiss();
+      return true;
     } catch (err) {
       console.error(err);
+      const code = err.code || "";
+      const isRateLimit = code === "GEMINI_RATE_LIMIT" || err.message.includes("429") || err.message.includes("rate limit");
+      const description = isRateLimit
+        ? "Gemini free-tier limit hit — you’ll need to wait ~20s before retrying."
+        : err.message || "Failed to fetch tutor response";
       setError(err.message || "Failed to fetch tutor response");
+      // Sticky toast for LLM/API errors, with explicit payload-bound Retry to avoid stale closure
+      toast.error(isRateLimit ? "Rate limit hit" : "Tutor unavailable", {
+        description,
+        duration: Infinity,
+        action: {
+          label: "Retry",
+          onClick: () => {
+            const retryPayload = err.payload || lastPayloadRef.current || payload;
+            // use setTimeout to allow toast to persist until retry resolves
+            executeTutor(retryPayload, true);
+          },
+        },
+        cancel: { label: "Dismiss", onClick: () => toast.dismiss() },
+      });
+      return false;
     } finally {
       setLoading(false);
     }
+  }, [speakText, applyDiagramUpdateStable]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!question.trim() || loading) return;
+    const canvasState = { nodes, edges };
+    const payload = { studentQuestion: question, canvasState, flowchartState: canvasState, chatHistory, selectedNodeId };
+    const ok = await executeTutor(payload);
+    if (ok) setQuestion("");
   };
 
   const handleClear = () => {
@@ -370,6 +406,8 @@ export default function App() {
     setDrawerOpen(false);
     setError("");
     setExpandedIds(new Set());
+    lastPayloadRef.current = null;
+    toast.success("Canvas cleared", { duration: 3000, description: "Welcome node restored — ask a new question" });
   };
 
   const handleReplay = () => { if (lastSpeech) speakText(lastSpeech); };
@@ -460,6 +498,7 @@ export default function App() {
                 </div>
               </div>
             )}
+            {loading && <ChatSkeleton />}
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-3 sticky bottom-0 bg-white pt-2">
               <textarea
@@ -541,8 +580,9 @@ export default function App() {
             </div>
           )}
 
-          <div className="absolute top-3 left-3 bg-white/95 backdrop-blur border border-slate-200 rounded-full px-3 py-1.5 text-xs text-slate-600 shadow-sm">
-            {nodes.length} nodes • {edges.length} edges
+          <div className="absolute top-3 left-3 bg-white/95 backdrop-blur border border-slate-200 rounded-full px-3 py-1.5 text-xs text-slate-600 shadow-sm flex items-center gap-2">
+            {loading && <Loader2 size={12} className="animate-spin text-violet-600 shrink-0" />}
+            <span>{nodes.length} nodes • {edges.length} edges</span>
           </div>
 
           <ExplanationDrawer

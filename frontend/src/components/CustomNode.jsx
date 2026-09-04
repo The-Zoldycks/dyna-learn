@@ -53,13 +53,17 @@ export default function CustomNode({ data, selected }) {
   const diamondStyle = shape === "diamond" ? { clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)", padding: "18px 12px", minWidth: 140 } : {};
 
   return (
-    <div className={`${base} ${variants[shape] || variants.rectangle} ${stateStyle}`} style={diamondStyle}>
+    <div
+      className={`${base} ${variants[shape] || variants.rectangle} ${stateStyle}`}
+      style={diamondStyle}
+      title={isHighlighted ? "Highlighted — student confusion detected (update_nodes highlight:true). Review this concept." : undefined}
+    >
       <Handle type="target" position={Position.Top} style={{ background: isHighlighted ? "#ef4444" : "#6366f1", width: 8, height: 8 }} />
       <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${isHighlighted ? "bg-red-100" : selected ? "bg-violet-100" : "bg-indigo-50"}`}>
         <Icon size={16} className={isHighlighted ? "text-red-600" : selected ? "text-violet-600" : "text-indigo-600"} />
       </div>
       <span className="flex-1 leading-tight text-[13px] text-center whitespace-pre-wrap break-words">{data.label}</span>
-      {isHighlighted && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white" />}
+      {isHighlighted && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white" aria-label="Highlighted" />}
       <Handle type="source" position={Position.Bottom} style={{ background: isHighlighted ? "#ef4444" : "#6366f1", width: 8, height: 8 }} />
     </div>
   );
