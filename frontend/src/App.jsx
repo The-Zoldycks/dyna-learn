@@ -381,8 +381,12 @@ export default function App() {
       {/* Header with branded logo */}
       <header className="flex items-center justify-between px-4 sm:px-6 py-3 bg-white border-b border-slate-200 shadow-sm shrink-0">
         <div className="flex items-center gap-3">
-          <img src="/brain-circuit-icon.png" alt="Dyna-learn" className="w-9 h-9 object-contain hidden sm:block" />
-          <img src="/dyna-learn-logo-blue.png" alt="Dyna-learn logo" className="h-8 object-contain" />
+          <img
+            src="/dyna-learn-logo-blue.png"
+            alt="Dyna-learn logo"
+            className="h-10 object-contain contrast-125 saturate-150 brightness-[0.97] drop-shadow-[0_1px_2px_rgba(0,0,0,0.12)]"
+            style={{ filter: "contrast(1.35) saturate(1.2)" }}
+          />
           <div className="hidden sm:block border-l border-slate-200 pl-3 ml-1">
             <h1 className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase leading-none">Interactive AI Tutor</h1>
             <p className="text-[11px] text-slate-400">Gemini 3.1 Flash Lite • Dagre Layout</p>
@@ -528,12 +532,11 @@ export default function App() {
             <MiniMap pannable zoomable style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0" }} />
           </ReactFlow>
 
-          {/* Empty state illustration when only welcome node */}
+          {/* Empty state hint when only welcome node */}
           {nodes.length === 1 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="bg-white/80 backdrop-blur rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col items-center gap-3 mt-24">
-                <img src="/brain-circuit-icon.png" alt="" className="w-16 h-16 opacity-80" />
-                <p className="text-xs text-slate-500 text-center max-w-[220px]">Canvas is ready — ask about any topic and watch the diagram build itself</p>
+              <div className="bg-white/80 backdrop-blur rounded-2xl px-5 py-4 border border-slate-200 shadow-sm mt-24">
+                <p className="text-xs text-slate-500 text-center max-w-[240px]">Canvas is ready — ask about any topic and watch the diagram build itself</p>
               </div>
             </div>
           )}
