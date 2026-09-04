@@ -8,6 +8,16 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+// Fallback chain for new-user 404 on 2.5 models (see https://ai.google.dev/gemini-api/docs/deprecations)
+// Valid new-user models per ListModels: 3.x family + aliases
+const FALLBACK_MODELS = [
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite",
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+  "gemini-3.1-flash-lite-preview",
+];
 
 // Middleware
 app.use(cors({
@@ -196,15 +206,34 @@ Rules:
       parts: [{ text: currentPrompt }],
     });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema,
-      },
-    });
+    // Try primary model, fallback on 404 (new-user restriction on 2.5)
+    let response;
+    let lastError;
+    const candidates = [GEMINI_MODEL, ...FALLBACK_MODELS.filter((m) => m !== GEMINI_MODEL)];
+    for (const model of candidates) {
+      try {
+        console.log(`[tutor] attempting model: ${model} | selectedNode: ${selectedNodeId || "none"} | history: ${windowedHistory.length}`);
+        response = await ai.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema,
+          },
+        });
+        console.log(`[tutor] success with model: ${model}`);
+        break;
+      } catch (err) {
+        lastError = err;
+        const msg = err?.message || "";
+        const is404 = msg.includes("404") || msg.includes("NOT_FOUND") || msg.includes("no longer available");
+        console.warn(`[tutor] model ${model} failed: ${msg.slice(0, 200)}`);
+        if (!is404) throw err;
+        // otherwise continue to next fallback
+      }
+    }
+    if (!response) throw lastError || new Error("All Gemini models failed");
 
     // Extract text - SDK returns response.text
     let resultText = response.text;
