@@ -108,14 +108,28 @@ app.post("/api/tutor", async (req, res) => {
             },
             nodes: {
               type: "array",
-              description: "Array of nodes for the flowchart. For add_nodes: nodes to add. For update_nodes: nodes to update (highlight). For clear_canvas: empty or omitted.",
+              description: "Array of nodes for the flowchart. For add_nodes: nodes to add. For update_nodes: nodes to update (highlight). For clear_canvas: empty. Position is OPTIONAL — frontend auto-layouts via dagre; do NOT guess coordinates.",
               items: {
                 type: "object",
                 properties: {
                   id: { type: "string" },
-                  label: { type: "string" },
-                  type: { type: "string", description: "Node type e.g. input, default, output" },
-                  highlight: { type: "boolean", description: "If true, frontend should highlight node (e.g. red if student confused)" },
+                  label: { type: "string", description: "Short label for the node (2-4 words)" },
+                  icon: {
+                    type: "string",
+                    enum: [
+                      "clipboard", "palette", "code", "bug", "rocket", "wrench",
+                      "database", "server", "cloud", "lock", "file", "user",
+                      "layers", "cog", "shield", "book", "lightbulb", "network", "cpu", "brain"
+                    ],
+                    description: "Icon name from allowed list. Pick best semantic match: clipboard=Planning, palette=Design, code=Implementation, bug=Testing, rocket=Deployment, wrench=Maintenance, database=DB, server=API/backend, cloud=DevOps, lock=Security, file=Documentation, user=User, layers=Architecture, cog=Process, shield=Auth, book=Concept, lightbulb=Idea, network=Connection, cpu=Computation, brain=AI/Logic. Fallback to book.",
+                  },
+                  shape: {
+                    type: "string",
+                    enum: ["rectangle", "pill", "diamond", "circle"],
+                    description: "Visual shape preset: rectangle=default, pill=start/end, diamond=decision, circle=state. Optional.",
+                  },
+                  highlight: { type: "boolean", description: "If true, frontend highlights node red (e.g. student confused about selected node)" },
+                  // Position is deprecated — dagre calculates layout. Include only if you must, otherwise omit.
                   position: {
                     type: "object",
                     properties: {
@@ -162,27 +176,29 @@ app.post("/api/tutor", async (req, res) => {
       ? `Selected node -> id: "${selectedNodeContext.id}", label: "${selectedNodeContext.label}", type: "${selectedNodeContext.type}"`
       : "No node selected.";
 
+    const allowedIcons = ["clipboard","palette","code","bug","rocket","wrench","database","server","cloud","lock","file","user","layers","cog","shield","book","lightbulb","network","cpu","brain"];
     const systemInstruction = `You are Dyna-learn, an interactive AI tutor operating as an asynchronous state generator in a decoupled React + Express architecture.
 
 Context you MUST use:
-- CanvasState (ReactFlow current nodes/edges): ${JSON.stringify(effectiveCanvas)}
+- CanvasState (ReactFlow current nodes/edges — positions are auto-calculated, ignore x/y): ${JSON.stringify(effectiveCanvas)}
 - ${selectedNodeText}
 - ChatHistory (sliding window last 6 turns, 3 user + 3 AI): 
 ${historyText}
 
 Rules:
 - Always respond with valid JSON matching the required schema.
-- speech_text: a clear, concise, encouraging explanation tailored to the student's current question AND selected node + history for personalization. If a node is selected, explicitly reference it.
+- speech_text: a clear, concise, encouraging explanation tailored to the student's current question AND selected node + history for personalization. If a node is selected and the question is about that node's concept, explicitly reference it. If the question is clearly about a DIFFERENT concept (e.g., user asks about Testing but selected is Concept), do NOT highlight the selected node — highlight the relevant node instead or use none.
 - diagram_update.action MUST be one of: add_nodes, add_edges, update_nodes, clear_canvas, none. Prefer these 4. Only use legacy values if you must.
-  - add_nodes: add new concept nodes to the flowchart (provide nodes with id, label, position).
-  - add_edges: add connections between nodes (provide edges with id, source, target, optional label).
-  - update_nodes: highlight or update an existing node (e.g., if student is confused about selected node, set highlight:true to turn it red). Provide nodes with id and highlight flag.
+  - add_nodes: add new concept nodes to the flowchart. Provide nodes with id, label, icon (MUST be one of: ${allowedIcons.join(",")} — REQUIRED for every node), optional shape (rectangle|pill|diamond|circle). DO NOT provide position — frontend auto-layouts via dagre into a clean grid. Provide edges array to connect them. Example node: {"id":"planning","label":"Planning & Analysis","icon":"clipboard","shape":"rectangle"}. Example edge: {"id":"e1","source":"planning","target":"design","label":"next"}.
+  - add_edges: add connections between nodes (provide edges with id, source, target, optional label). Nodes optional.
+  - update_nodes: highlight or update an existing node (e.g., if student is confused about selected node, set highlight:true). Provide nodes with id and highlight flag + icon if updating. Use this ONLY when the student's confusion maps to the selected node.
   - clear_canvas: reset the canvas (provide empty nodes/edges).
   - none: no diagram change.
-- You may return both nodes and edges in a single update when needed (e.g., add_nodes + add_edges together in one action; use add_nodes with edges populated, frontend will append both).
-- Keep diagrams simple, incremental, and pedagogically useful. Do not recreate entire canvas unless using clear_canvas.
+- You may return both nodes and edges in a single update when needed (e.g., add_nodes with edges populated, frontend will append both).
+- Keep diagrams simple, incremental, and pedagogically useful. Do not recreate entire canvas unless using clear_canvas. Ideal granularity: 3-7 nodes for an overview, up to 10 for detailed breakdown.
 - If the question is unrelated to learning, gently redirect and use action none.
-- Personalize using history: do not repeat explanations already given; build upon last 6 turns.`;
+- Personalize using history: do not repeat explanations already given; build upon last 6 turns.
+- Icon guidance: clipboard=Planning/Analysis, palette=Design, code=Implementation/Code, bug=Testing/QA, rocket=Deployment/Release, wrench=Maintenance/Support, database=DB/Storage, server=Backend/API, cloud=Cloud/DevOps, lock=Security/Auth, file=Docs/Files, user=User/Actor, layers=Architecture, cog=Process, shield=Protection, book=Concept/Theory, lightbulb=Idea, network=Connection, cpu=Compute, brain=AI/Logic.`;
 
     // Build contents array from windowed history + current question for Gemini context
     const contents = [];
