@@ -3,7 +3,6 @@
   "private": true,
   "version": "1.0.0",
   "description": "Dyna-learn monorepo — interactive AI tutor",
-  "workspaces": ["frontend", "backend"],
   "scripts": {
     "dev:backend": "npm --workspace backend run dev",
     "dev:frontend": "npm --workspace frontend run dev",
