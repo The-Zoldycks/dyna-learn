@@ -178,9 +178,9 @@ export default function App() {
       if (e.message === "TTS_NO_KEY") return false;
       if (e.message === "TTS_UNPURCHASED") {
         toast.error("Qwen not activated", {
-          description: e.hint || "Enable Qwen3-TTS in DashScope Model Studio, then retry. Using browser voice for now.",
+          description: e.hint || "Qwen3-TTS needs activation in Bailian (moved 2026-08-01). Using browser voice for now.",
           duration: Infinity,
-          action: { label: "Open Console", onClick: () => window.open("https://dashscope.console.aliyun.com/modelStudio", "_blank") },
+          action: { label: "Open Bailian", onClick: () => window.open("https://bailian.console.aliyun.com", "_blank") },
         });
         return false;
       }
