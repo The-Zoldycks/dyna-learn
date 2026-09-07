@@ -2,6 +2,13 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
+import { createRequire } from "node:module";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
+const require = createRequire(import.meta.url);
+const { EdgeTTS } = require("node-edge-tts");
 
 dotenv.config();
 
@@ -19,19 +26,17 @@ const FALLBACK_MODELS = [
   "gemini-3.1-flash-lite-preview",
 ];
 
-// TTS — Qwen3 hybrid (no-budget: browser fallback if DashScope key missing)
-const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || "";
-const DASHSCOPE_TTS_URL = process.env.DASHSCOPE_TTS_URL || "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
-const QWEN_VOICES = [
-  { id: "Vivian", label: "Vivian — Bright young female (CN)", lang: "Chinese" },
-  { id: "Serena", label: "Serena — Warm gentle female (CN)", lang: "Chinese" },
-  { id: "Uncle_Fu", label: "Uncle Fu — Mellow male (CN)", lang: "Chinese" },
-  { id: "Dylan", label: "Dylan — Beijing male (CN-Beijing)", lang: "Chinese" },
-  { id: "Eric", label: "Eric — Chengdu male (CN-Sichuan)", lang: "Chinese" },
-  { id: "Ryan", label: "Ryan — Dynamic male (EN)", lang: "English" },
-  { id: "Aiden", label: "Aiden — Sunny American male (EN)", lang: "English" },
-  { id: "Ono_Anna", label: "Ono Anna — Playful Japanese female", lang: "Japanese" },
-  { id: "Sohee", label: "Sohee — Warm Korean female", lang: "Korean" },
+// TTS — self-hosted edge-tts (Toolbox parity, no external fetch, no cold start)
+const EDGE_VOICE_FALLBACK = [
+  { id: "en-US-AriaNeural", label: "Aria — Warm female (US)", lang: "English", locale: "en-US" },
+  { id: "en-US-JennyNeural", label: "Jenny — Friendly female (US)", lang: "English", locale: "en-US" },
+  { id: "en-US-GuyNeural", label: "Guy — Mature male (US)", lang: "English", locale: "en-US" },
+  { id: "en-GB-SoniaNeural", label: "Sonia — Bright female (UK)", lang: "English", locale: "en-GB" },
+  { id: "en-GB-RyanNeural", label: "Ryan — Youthful male (UK)", lang: "English", locale: "en-GB" },
+  { id: "zh-CN-XiaoxiaoNeural", label: "Xiaoxiao — Young female (CN)", lang: "Chinese", locale: "zh-CN" },
+  { id: "zh-CN-YunxiNeural", label: "Yunxi — Young male (CN)", lang: "Chinese", locale: "zh-CN" },
+  { id: "ja-JP-NanamiNeural", label: "Nanami — Young female (JP)", lang: "Japanese", locale: "ja-JP" },
+  { id: "ko-KR-SunHiNeural", label: "SunHi — Young female (KR)", lang: "Korean", locale: "ko-KR" },
 ];
 
 // Middleware
@@ -297,58 +302,56 @@ Rules:
   }
 });
 
-// --- Qwen3-TTS proxy (hybrid: DashScope when key present, else 503 fallback to browser) ---
-app.get("/api/tts/voices", (req, res) => {
-  res.json({ voices: QWEN_VOICES, mode: DASHSCOPE_API_KEY ? "qwen" : "browser-fallback", note: DASHSCOPE_API_KEY ? "DashScope key present" : "No DASHSCOPE_API_KEY — frontend will use browser SpeechSynthesis (no budget)" });
+// --- Edge TTS self-hosted (in-process, no fetch, same as Toolbox-backend) ---
+const EDGE_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+const EDGE_VOICE_LIST_URL = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=${EDGE_TOKEN}`;
+
+app.get("/api/tts/voices", async (req, res) => {
+  try {
+    const resp = await fetch(EDGE_VOICE_LIST_URL);
+    if (!resp.ok) throw new Error(`voices ${resp.status}`);
+    const voices = await resp.json();
+    const filtered = voices
+      .filter((v) => v.Locale.startsWith("en-") || v.Locale.startsWith("zh-") || v.Locale.startsWith("ja-") || v.Locale.startsWith("ko-"))
+      .slice(0, 30)
+      .map((v) => ({ id: v.ShortName, label: `${String(v.FriendlyName).replace("Microsoft ", "")} — ${v.Gender} (${v.Locale})`, lang: v.Locale, gender: v.Gender, locale: v.Locale }));
+    if (filtered.length) return res.json({ voices: filtered, mode: "edge", count: filtered.length });
+    throw new Error("empty");
+  } catch (e) {
+    console.warn("[tts] getVoices failed, using fallback:", e.message);
+    res.json({ voices: EDGE_VOICE_FALLBACK, mode: "edge-fallback", count: EDGE_VOICE_FALLBACK.length });
+  }
 });
 
 app.post("/api/tts", async (req, res) => {
   try {
-    const { text, voice = "Ryan", language = "English", rate = "+0%", instruct } = req.body || {};
+    const { text, voice = "en-US-AriaNeural", rate = "+0%", volume = "+0%", pitch = "+0Hz" } = req.body || {};
     if (!text || !text.trim()) return res.status(400).json({ error: "text required", code: "TTS_TEXT_REQUIRED" });
     const trimmed = text.slice(0, 5000);
-    if (!DASHSCOPE_API_KEY) {
-      return res.status(503).json({ error: "TTS not configured — no budget: use browser fallback", code: "TTS_NO_KEY", fallback: "browser", voices: QWEN_VOICES });
-    }
-    // DashScope Qwen3-TTS realtime proxy — streams audio/mpeg back
-    // Docs: https://www.alibabacloud.com/help/en/model-studio/qwen-tts-realtime
-    const dashRes = await fetch(DASHSCOPE_TTS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${DASHSCOPE_API_KEY}`,
-        "X-DashScope-OssResourceResolve": "enable",
-      },
-      body: JSON.stringify({
-        model: "qwen3-tts-flash",
-        input: { text: trimmed, voice, language, rate, instruct },
-        parameters: { format: "mp3" },
-      }),
-    });
-    if (!dashRes.ok) {
-      const errText = await dashRes.text();
-      console.warn(`[tts] DashScope ${dashRes.status}: ${errText.slice(0, 400)}`);
-      let code = dashRes.status === 429 ? "TTS_RATE_LIMIT" : "TTS_DASHSCOPE_ERROR";
-      if (errText.includes("AccessDenied.Unpurchased") || errText.includes("Unpurchased")) code = "TTS_UNPURCHASED";
-      return res.status(dashRes.status).json({ error: "DashScope TTS failed", details: errText.slice(0, 1000), code, hint: code === "TTS_UNPURCHASED" ? "DashScope Model Studio moved 2026-08-01 → enable Qwen3-TTS at https://bailian.console.aliyun.com (Model Studio) -> Qwen3-TTS -> Activate. Old dashscope.console.aliyun.com is offline." : undefined });
-    }
+    if (trimmed.length !== text.length) console.log(`[tts] truncated ${text.length} -> 5000 chars`);
+    console.log(`[tts] synthesize voice=${voice} len=${trimmed.length}`);
+    // node-edge-tts writes to file, so create temp file
+    const tmpPath = path.join(os.tmpdir(), `dyna-tts-${crypto.randomUUID()}.mp3`);
+    const ttsEngine = new EdgeTTS({ voice, rate, volume, pitch });
+    await ttsEngine.ttsPromise(trimmed, tmpPath);
+    const audioBuffer = fs.readFileSync(tmpPath);
+    try { fs.unlinkSync(tmpPath); } catch {}
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("X-TTS-Voice", voice);
-    if (dashRes.body && dashRes.body.pipe) {
-      dashRes.body.pipe(res);
-    } else {
-      const buf = Buffer.from(await dashRes.arrayBuffer());
-      res.send(buf);
-    }
+    res.setHeader("Content-Length", audioBuffer.length);
+    res.send(audioBuffer);
   } catch (err) {
     console.error("Error in /api/tts:", err);
-    res.status(500).json({ error: "TTS proxy failed", details: err.message, code: "TTS_PROXY_ERROR" });
+    const msg = err.message || String(err);
+    let code = "TTS_ERROR";
+    if (msg.includes("429") || msg.toLowerCase().includes("throttl")) code = "TTS_RATE_LIMIT";
+    res.status(500).json({ error: "Edge TTS failed", details: msg.slice(0, 1000), code });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`Dyna-learn backend running on http://localhost:${PORT}`);
   console.log(`CORS enabled for: ${FRONTEND_URL}`);
-  console.log(`TTS mode: ${DASHSCOPE_API_KEY ? "Qwen DashScope (voices selectable)" : "browser fallback (no DASHSCOPE_API_KEY — set to enable Qwen)"}`);
+  console.log(`TTS mode: edge-tts self-hosted (in-process, no fetch, same as Toolbox-backend)`);
 });

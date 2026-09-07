@@ -48,22 +48,35 @@ export default function App() {
   const [expandedIds, setExpandedIds] = useState(new Set());
   const lastPayloadRef = useRef(null);
   const [browserVoices, setBrowserVoices] = useState([]);
-  const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem("dyna-voice") || "");
+  const [edgeVoices, setEdgeVoices] = useState([]);
+  const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem("dyna-voice") || "en-US-AriaNeural");
+  const [showMetrics, setShowMetrics] = useState(false);
+  const audioRef = useRef(null);
+  const audioUrlRef = useRef(null);
 
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, type: "smoothstep", animated: false }, eds)), [setEdges]);
   const onNodeClick = useCallback((_, node) => setSelectedNodeId(node.id), []);
   const onPaneClick = useCallback(() => setSelectedNodeId(null), []);
 
   useEffect(() => {
+    // Unified voices: Edge Neural (top, fetched from self-hosted backend) + Browser Offline (bottom)
+    fetch("http://localhost:3000/api/tts/voices")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.voices?.length) setEdgeVoices(data.voices);
+      })
+      .catch(() => {});
     const loadVoices = () => {
       const voices = window.speechSynthesis?.getVoices() || [];
-      if (voices.length) {
-        setBrowserVoices(voices);
-        if (!localStorage.getItem("dyna-voice") && voices[0]) setSelectedVoice(voices[0].name);
-      }
+      if (voices.length) setBrowserVoices(voices);
     };
     loadVoices();
     if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = loadVoices;
+    const onKey = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "d") setShowMetrics((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffect(() => { if (selectedVoice) localStorage.setItem("dyna-voice", selectedVoice); }, [selectedVoice]);
@@ -77,9 +90,15 @@ export default function App() {
     });
   };
 
-  const speakText = useCallback((text) => {
+  const cleanupAudio = useCallback(() => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; audioRef.current = null; }
+    if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
+  }, []);
+  useEffect(() => () => { cleanupAudio(); window.speechSynthesis?.cancel(); }, [cleanupAudio]);
+
+  const speakBrowser = useCallback((text) => {
     if (!text || typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
+    window.speechSynthesis.cancel(); cleanupAudio();
     const utterance = new SpeechSynthesisUtterance(text);
     const bv = browserVoices.find((v) => v.name === selectedVoice || v.voiceURI === selectedVoice);
     if (bv) utterance.voice = bv;
@@ -90,22 +109,58 @@ export default function App() {
     utterance.onpause = () => setIsPaused(true);
     utterance.onresume = () => setIsPaused(false);
     window.speechSynthesis.speak(utterance);
-    setLastSpeech(text);
-    setDrawerText(text);
-  }, [browserVoices, selectedVoice]);
+  }, [browserVoices, selectedVoice, cleanupAudio]);
+
+  const speakEdge = useCallback(async (text) => {
+    try {
+      cleanupAudio(); window.speechSynthesis.cancel();
+      setIsSpeaking(true); setIsPaused(false);
+      const res = await fetch("http://localhost:3000/api/tts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.slice(0, 5000), voice: selectedVoice }),
+      });
+      if (!res.ok) throw new Error(`Edge TTS ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob); audioUrlRef.current = url;
+      const audio = new Audio(url); audioRef.current = audio;
+      audio.onplay = () => { setIsSpeaking(true); setIsPaused(false); };
+      audio.onpause = () => { if (!audio.ended) setIsPaused(true); };
+      audio.onended = () => { setIsSpeaking(false); setIsPaused(false); cleanupAudio(); };
+      audio.onerror = () => { setIsSpeaking(false); setIsPaused(false); cleanupAudio(); throw new Error("Audio failed"); };
+      await audio.play(); return true;
+    } catch (e) {
+      cleanupAudio(); setIsSpeaking(false); setIsPaused(false);
+      console.warn("Edge TTS failed, falling back:", e.message);
+      return false;
+    }
+  }, [selectedVoice, cleanupAudio]);
+
+  const isEdgeVoice = (voice) => voice.includes("Neural") || edgeVoices.some((v) => v.id === voice);
+
+  const speakText = useCallback(async (text) => {
+    if (!text) return;
+    setLastSpeech(text); setDrawerText(text);
+    if (isEdgeVoice(selectedVoice)) {
+      const ok = await speakEdge(text);
+      if (ok) return;
+      toast.info("Falling back to browser voice", { duration: 2500, description: "Edge neural unavailable — using offline voice." });
+    }
+    speakBrowser(text);
+  }, [selectedVoice, edgeVoices, speakEdge, speakBrowser]);
 
   const pauseSpeech = useCallback(() => {
+    if (audioRef.current && !audioRef.current.paused) { audioRef.current.pause(); setIsPaused(true); return; }
     if (window.speechSynthesis?.speaking && !isPaused) { window.speechSynthesis.pause(); setIsPaused(true); }
   }, [isPaused]);
 
   const resumeSpeech = useCallback(() => {
+    if (audioRef.current && audioRef.current.paused) { audioRef.current.play().then(()=>setIsPaused(false)).catch(()=>setIsPaused(false)); return; }
     if (isPaused) { window.speechSynthesis.resume(); setIsPaused(false); }
   }, [isPaused]);
 
   const stopSpeech = useCallback(() => {
-    window.speechSynthesis.cancel();
-    setIsSpeaking(false); setIsPaused(false);
-  }, []);
+    cleanupAudio(); window.speechSynthesis.cancel(); setIsSpeaking(false); setIsPaused(false);
+  }, [cleanupAudio]);
 
   const inferIcon = (label = "") => {
     const l = label.toLowerCase();
@@ -342,7 +397,7 @@ export default function App() {
           <img src="/dyna-learn-logo-blue.png" alt="Dyna-learn logo" className="h-16 object-contain contrast-125 saturate-150 brightness-[0.97] drop-shadow-[0_2px_6px_rgba(0,0,0,0.2)]" style={{ filter: "contrast(1.55) saturate(1.3) brightness(0.96)" }} />
           <div className="hidden sm:block border-l border-slate-200 pl-3 ml-1">
             <h1 className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase leading-none">Interactive AI Tutor</h1>
-            <p className="text-[11px] text-slate-400">Gemini 3.1 Flash Lite • Dagre Layout</p>
+            <p className="text-[11px] text-slate-400">Learn by asking</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -378,16 +433,21 @@ export default function App() {
             <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700">
                 <Mic size={12} className="text-violet-600" /> Voice
-                <span className="ml-auto text-[10px] text-slate-500">{browserVoices.length} device voices</span>
+                <span className="ml-auto text-[10px] text-slate-500">{edgeVoices.length + browserVoices.length} voices</span>
               </div>
               <select
                 value={selectedVoice}
                 onChange={(e) => setSelectedVoice(e.target.value)}
                 className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500"
               >
-                {browserVoices.length ? browserVoices.map((v) => <option key={v.name + v.voiceURI} value={v.name}>{v.name} — {v.lang}</option>) : <option value="">Default system voice</option>}
+                <optgroup label="Neural — Edge (online)">
+                  {edgeVoices.length ? edgeVoices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>) : <option value="en-US-AriaNeural">Aria — Warm female (US) — loading…</option>}
+                </optgroup>
+                <optgroup label="Offline / Standard">
+                  {browserVoices.length ? browserVoices.map((v) => <option key={v.name + v.voiceURI} value={v.name}>{v.name} — {v.lang}</option>) : <option value="">Default system voice</option>}
+                </optgroup>
               </select>
-              <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">Free browser voices • instant • offline. Pause/Resume/Stop while playing.</p>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">Top: neural Edge (same as Toolbox, no cold start). Bottom: offline device voices. Tip: Ctrl+Shift+D shows node count.</p>
             </div>
           </div>
 
@@ -471,10 +531,12 @@ export default function App() {
               </div>
             </div>
           )}
-          <div className="absolute top-3 left-3 bg-white/95 backdrop-blur border border-slate-200 rounded-full px-3 py-1.5 text-xs text-slate-600 shadow-sm flex items-center gap-2">
-            {loading && <Loader2 size={12} className="animate-spin text-violet-600 shrink-0" />}
-            <span>{nodes.length} nodes • {edges.length} edges</span>
-          </div>
+          {showMetrics && (
+            <div className="absolute top-3 left-3 bg-white/95 backdrop-blur border border-slate-200 rounded-full px-3 py-1.5 text-xs text-slate-600 shadow-sm flex items-center gap-2">
+              {loading && <Loader2 size={12} className="animate-spin text-violet-600 shrink-0" />}
+              <span>{nodes.length} nodes • {edges.length} edges</span>
+            </div>
+          )}
           <ExplanationDrawer open={drawerOpen} speechText={drawerText || lastSpeech} onClose={() => setDrawerOpen(false)} onReplay={handleReplay} onPause={pauseSpeech} onResume={resumeSpeech} onStop={stopSpeech} isSpeaking={isSpeaking} isPaused={isPaused} />
         </div>
       </div>
