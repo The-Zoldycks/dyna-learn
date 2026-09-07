@@ -153,6 +153,12 @@ export default function App() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         if (err.code === "TTS_NO_KEY") throw new Error("TTS_NO_KEY");
+        if (err.code === "TTS_UNPURCHASED") {
+          const e = new Error("TTS_UNPURCHASED");
+          e.hint = err.hint;
+          e.details = err.details;
+          throw e;
+        }
         throw new Error(err.details || err.error || `TTS ${res.status}`);
       }
       const blob = await res.blob();
@@ -170,6 +176,14 @@ export default function App() {
       cleanupAudio();
       setIsSpeaking(false); setIsPaused(false);
       if (e.message === "TTS_NO_KEY") return false;
+      if (e.message === "TTS_UNPURCHASED") {
+        toast.error("Qwen not activated", {
+          description: e.hint || "Enable Qwen3-TTS in DashScope Model Studio, then retry. Using browser voice for now.",
+          duration: Infinity,
+          action: { label: "Open Console", onClick: () => window.open("https://dashscope.console.aliyun.com/modelStudio", "_blank") },
+        });
+        return false;
+      }
       console.warn("Qwen TTS failed, falling back:", e.message);
       return false;
     }

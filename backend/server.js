@@ -328,7 +328,9 @@ app.post("/api/tts", async (req, res) => {
     if (!dashRes.ok) {
       const errText = await dashRes.text();
       console.warn(`[tts] DashScope ${dashRes.status}: ${errText.slice(0, 400)}`);
-      return res.status(dashRes.status).json({ error: "DashScope TTS failed", details: errText.slice(0, 1000), code: dashRes.status === 429 ? "TTS_RATE_LIMIT" : "TTS_DASHSCOPE_ERROR" });
+      let code = dashRes.status === 429 ? "TTS_RATE_LIMIT" : "TTS_DASHSCOPE_ERROR";
+      if (errText.includes("AccessDenied.Unpurchased") || errText.includes("Unpurchased")) code = "TTS_UNPURCHASED";
+      return res.status(dashRes.status).json({ error: "DashScope TTS failed", details: errText.slice(0, 1000), code, hint: code === "TTS_UNPURCHASED" ? "Enable Qwen3-TTS in DashScope Model Studio: https://dashscope.console.aliyun.com/modelStudio -> Qwen3-TTS -> Activate" : undefined });
     }
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "private, max-age=3600");
