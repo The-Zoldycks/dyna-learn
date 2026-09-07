@@ -68,3 +68,16 @@ Response enforced via responseMimeType: application/json + responseSchema.
 - **Loading:** Chat-only `ChatSkeleton` (`components/ChatSkeleton.jsx`) pulses in left panel while `loading`; canvas stays interactive (pan/zoom) with subtle corner spinner `top-3 left-3` — no overlay.
 - **Icons:** All nodes use `CustomNode` presets `rectangle/pill/diamond/circle` + lucide icons; highlight red overrides selection violet.
 - **Error handling:** Backend returns `{code}` (`GEMINI_RATE_LIMIT` 429 etc.) mapped to toast descriptions.
+
+## TTS — Selectable Voices (Hybrid, No Budget, No Cold Start)
+
+No budget: defaults to free browser `SpeechSynthesis` (instant, offline, device voices). Optional Qwen3-TTS neural when `DASHSCOPE_API_KEY` set — 9 selectable voices without cold start (vs Toolbox Render 30s).
+
+| Mode | Voices | Source | When |
+|---|---|---|---|
+| `Browser` (default) | Device voices via `speechSynthesis.getVoices()` (populated on load) | `App.jsx: speakBrowser` | No key, offline, 0s |
+| `Qwen` | `Vivian/Serena/Uncle_Fu/Dylan/Eric/Ryan/Aiden/Ono_Anna/Sohee` — `GET /api/tts/voices` | `backend/server.js: QWEN_VOICES` proxied to DashScope `qwen-tts-realtime` | `DASHSCOPE_API_KEY` set, streaming 97ms |
+
+- **Selector:** Left panel `Voice` card (Browser/Qwen toggle + dropdown). Persists to `localStorage` (`dyna-voice`, `dyna-tts-mode`). Qwen toggle disabled with hint when no key.
+- **Hybrid speak:** `App.jsx: speakText` tries `POST /api/tts {text, voice}` → `audio/mpeg` blob → `Audio` play with same `isSpeaking/isPaused` state as browser (pause/resume/stop unified via `audioRef` + `speechSynthesis`). On `503 TTS_NO_KEY` or fetch fail, toasts `Falling back to browser voice` and auto-plays browser.
+- **Backend:** `GET /api/tts/voices` returns `{voices, mode}`, `POST /api/tts` streams MP3 when key present else `503 TTS_NO_KEY` (frontend fallback). Free tier: keep `Browser`, add key later at https://dashscope.console.aliyun.com — no code change.

@@ -19,6 +19,21 @@ const FALLBACK_MODELS = [
   "gemini-3.1-flash-lite-preview",
 ];
 
+// TTS — Qwen3 hybrid (no-budget: browser fallback if DashScope key missing)
+const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || "";
+const DASHSCOPE_TTS_URL = process.env.DASHSCOPE_TTS_URL || "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+const QWEN_VOICES = [
+  { id: "Vivian", label: "Vivian — Bright young female (CN)", lang: "Chinese" },
+  { id: "Serena", label: "Serena — Warm gentle female (CN)", lang: "Chinese" },
+  { id: "Uncle_Fu", label: "Uncle Fu — Mellow male (CN)", lang: "Chinese" },
+  { id: "Dylan", label: "Dylan — Beijing male (CN-Beijing)", lang: "Chinese" },
+  { id: "Eric", label: "Eric — Chengdu male (CN-Sichuan)", lang: "Chinese" },
+  { id: "Ryan", label: "Ryan — Dynamic male (EN)", lang: "English" },
+  { id: "Aiden", label: "Aiden — Sunny American male (EN)", lang: "English" },
+  { id: "Ono_Anna", label: "Ono Anna — Playful Japanese female", lang: "Japanese" },
+  { id: "Sohee", label: "Sohee — Warm Korean female", lang: "Korean" },
+];
+
 // Middleware
 app.use(cors({
   origin: FRONTEND_URL,
@@ -282,7 +297,56 @@ Rules:
   }
 });
 
+// --- Qwen3-TTS proxy (hybrid: DashScope when key present, else 503 fallback to browser) ---
+app.get("/api/tts/voices", (req, res) => {
+  res.json({ voices: QWEN_VOICES, mode: DASHSCOPE_API_KEY ? "qwen" : "browser-fallback", note: DASHSCOPE_API_KEY ? "DashScope key present" : "No DASHSCOPE_API_KEY — frontend will use browser SpeechSynthesis (no budget)" });
+});
+
+app.post("/api/tts", async (req, res) => {
+  try {
+    const { text, voice = "Ryan", language = "English", rate = "+0%", instruct } = req.body || {};
+    if (!text || !text.trim()) return res.status(400).json({ error: "text required", code: "TTS_TEXT_REQUIRED" });
+    const trimmed = text.slice(0, 5000);
+    if (!DASHSCOPE_API_KEY) {
+      return res.status(503).json({ error: "TTS not configured — no budget: use browser fallback", code: "TTS_NO_KEY", fallback: "browser", voices: QWEN_VOICES });
+    }
+    // DashScope Qwen3-TTS realtime proxy — streams audio/mpeg back
+    // Docs: https://www.alibabacloud.com/help/en/model-studio/qwen-tts-realtime
+    const dashRes = await fetch(DASHSCOPE_TTS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${DASHSCOPE_API_KEY}`,
+        "X-DashScope-OssResourceResolve": "enable",
+      },
+      body: JSON.stringify({
+        model: "qwen3-tts-flash",
+        input: { text: trimmed, voice, language, rate, instruct },
+        parameters: { format: "mp3" },
+      }),
+    });
+    if (!dashRes.ok) {
+      const errText = await dashRes.text();
+      console.warn(`[tts] DashScope ${dashRes.status}: ${errText.slice(0, 400)}`);
+      return res.status(dashRes.status).json({ error: "DashScope TTS failed", details: errText.slice(0, 1000), code: dashRes.status === 429 ? "TTS_RATE_LIMIT" : "TTS_DASHSCOPE_ERROR" });
+    }
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-TTS-Voice", voice);
+    if (dashRes.body && dashRes.body.pipe) {
+      dashRes.body.pipe(res);
+    } else {
+      const buf = Buffer.from(await dashRes.arrayBuffer());
+      res.send(buf);
+    }
+  } catch (err) {
+    console.error("Error in /api/tts:", err);
+    res.status(500).json({ error: "TTS proxy failed", details: err.message, code: "TTS_PROXY_ERROR" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Dyna-learn backend running on http://localhost:${PORT}`);
   console.log(`CORS enabled for: ${FRONTEND_URL}`);
+  console.log(`TTS mode: ${DASHSCOPE_API_KEY ? "Qwen DashScope (voices selectable)" : "browser fallback (no DASHSCOPE_API_KEY — set to enable Qwen)"}`);
 });

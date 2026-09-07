@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -11,7 +11,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
-  Pause, Play, Square, ChevronDown, ChevronUp, Maximize2, X
+  Pause, Play, Square, ChevronDown, ChevronUp, Maximize2, X, Mic, Settings2
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -47,10 +47,53 @@ export default function App() {
   const [drawerText, setDrawerText] = useState("");
   const [expandedIds, setExpandedIds] = useState(new Set());
   const lastPayloadRef = useRef(null);
+  // Voice selection (hybrid: Qwen neural when DASHSCOPE_API_KEY present, else browser fallback)
+  const QWEN_FALLBACK = [
+    { id: "Vivian", label: "Vivian — Bright young female (CN)" },
+    { id: "Serena", label: "Serena — Warm gentle female (CN)" },
+    { id: "Uncle_Fu", label: "Uncle Fu — Mellow male (CN)" },
+    { id: "Dylan", label: "Dylan — Beijing male" },
+    { id: "Eric", label: "Eric — Chengdu male" },
+    { id: "Ryan", label: "Ryan — Dynamic male (EN) ★ default" },
+    { id: "Aiden", label: "Aiden — Sunny American male (EN)" },
+    { id: "Ono_Anna", label: "Ono Anna — Playful Japanese female" },
+    { id: "Sohee", label: "Sohee — Warm Korean female" },
+  ];
+  const [qwenVoices, setQwenVoices] = useState(QWEN_FALLBACK);
+  const [ttsMode, setTtsMode] = useState(() => localStorage.getItem("dyna-tts-mode") || "browser");
+  const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem("dyna-voice") || "Ryan");
+  const [browserVoices, setBrowserVoices] = useState([]);
+  const [ttsAvailable, setTtsAvailable] = useState(false);
+  const audioRef = useRef(null);
+  const audioUrlRef = useRef(null);
 
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, type: "smoothstep", animated: false }, eds)), [setEdges]);
   const onNodeClick = useCallback((_, node) => setSelectedNodeId(node.id), []);
   const onPaneClick = useCallback(() => setSelectedNodeId(null), []);
+
+  // Load Qwen voices + browser voices
+  useEffect(() => {
+    fetch("http://localhost:3000/api/tts/voices")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.voices?.length) setQwenVoices(data.voices);
+        setTtsAvailable(data.mode === "qwen");
+        if (data.mode !== "qwen" && ttsMode === "qwen") setTtsMode("browser");
+      })
+      .catch(() => setTtsAvailable(false));
+    // Browser voices
+    const loadVoices = () => {
+      const voices = window.speechSynthesis?.getVoices() || [];
+      if (voices.length) setBrowserVoices(voices);
+    };
+    loadVoices();
+    if (window.speechSynthesis) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+  }, []);
+
+  useEffect(() => { localStorage.setItem("dyna-voice", selectedVoice); }, [selectedVoice]);
+  useEffect(() => { localStorage.setItem("dyna-tts-mode", ttsMode); }, [ttsMode]);
 
   const toggleExpand = (idx) => {
     setExpandedIds((prev) => {
@@ -61,11 +104,31 @@ export default function App() {
     });
   };
 
-  // Speech controls with pause/resume
-  const speakText = useCallback((text) => {
-    if (!text || typeof window === "undefined" || !window.speechSynthesis) return;
+  // Hybrid TTS: Qwen (neural) when available + selectable voice, else browser fallback (no budget)
+  const cleanupAudio = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => { cleanupAudio(); window.speechSynthesis?.cancel(); }, [cleanupAudio]);
+
+  const speakBrowser = useCallback((text) => {
+    if (!text || typeof window === "undefined" || !window.speechSynthesis) return false;
     window.speechSynthesis.cancel();
+    cleanupAudio();
     const utterance = new SpeechSynthesisUtterance(text);
+    // Try to map selectedVoice to browser voice if in browser mode
+    if (ttsMode === "browser") {
+      const bv = browserVoices.find((v) => v.name === selectedVoice || v.voiceURI === selectedVoice);
+      if (bv) utterance.voice = bv;
+    }
     utterance.rate = 1; utterance.pitch = 1; utterance.volume = 1; utterance.lang = "en-US";
     utterance.onstart = () => { setIsSpeaking(true); setIsPaused(false); };
     utterance.onend = () => { setIsSpeaking(false); setIsPaused(false); };
@@ -73,29 +136,80 @@ export default function App() {
     utterance.onpause = () => setIsPaused(true);
     utterance.onresume = () => setIsPaused(false);
     window.speechSynthesis.speak(utterance);
+    return true;
+  }, [browserVoices, selectedVoice, ttsMode, cleanupAudio]);
+
+  const speakQwen = useCallback(async (text) => {
+    if (!ttsAvailable) return false;
+    try {
+      cleanupAudio();
+      window.speechSynthesis.cancel();
+      setIsSpeaking(true); setIsPaused(false);
+      const res = await fetch("http://localhost:3000/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voice: selectedVoice, language: "English" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        if (err.code === "TTS_NO_KEY") throw new Error("TTS_NO_KEY");
+        throw new Error(err.details || err.error || `TTS ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onplay = () => { setIsSpeaking(true); setIsPaused(false); };
+      audio.onpause = () => { if (!audio.ended) setIsPaused(true); };
+      audio.onended = () => { setIsSpeaking(false); setIsPaused(false); cleanupAudio(); };
+      audio.onerror = () => { setIsSpeaking(false); setIsPaused(false); cleanupAudio(); throw new Error("Audio playback failed"); };
+      await audio.play();
+      return true;
+    } catch (e) {
+      cleanupAudio();
+      setIsSpeaking(false); setIsPaused(false);
+      if (e.message === "TTS_NO_KEY") return false;
+      console.warn("Qwen TTS failed, falling back:", e.message);
+      return false;
+    }
+  }, [selectedVoice, ttsAvailable, cleanupAudio]);
+
+  const speakText = useCallback(async (text) => {
+    if (!text) return;
     setLastSpeech(text);
     setDrawerText(text);
-  }, []);
+    // Try Qwen if mode is qwen and available
+    if (ttsMode === "qwen" && ttsAvailable) {
+      const ok = await speakQwen(text);
+      if (ok) return;
+      // fall through to browser with toast hint
+      toast.info("Falling back to browser voice", { duration: 2500, description: "Qwen not configured — using free browser voice. Add DASHSCOPE_API_KEY to enable neural voices." });
+    }
+    speakBrowser(text);
+  }, [ttsMode, ttsAvailable, speakQwen, speakBrowser]);
 
   const pauseSpeech = useCallback(() => {
-    if (window.speechSynthesis?.speaking && !isPaused) {
-      window.speechSynthesis.pause();
-      setIsPaused(true);
+    if (ttsMode === "qwen" && audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause(); setIsPaused(true); return;
     }
-  }, [isPaused]);
+    if (window.speechSynthesis?.speaking && !isPaused) {
+      window.speechSynthesis.pause(); setIsPaused(true);
+    }
+  }, [ttsMode, isPaused]);
 
   const resumeSpeech = useCallback(() => {
-    if (isPaused) {
-      window.speechSynthesis.resume();
-      setIsPaused(false);
+    if (ttsMode === "qwen" && audioRef.current && audioRef.current.paused) {
+      audioRef.current.play().then(() => setIsPaused(false)).catch(() => setIsPaused(false)); return;
     }
-  }, [isPaused]);
+    if (isPaused) { window.speechSynthesis.resume(); setIsPaused(false); }
+  }, [ttsMode, isPaused]);
 
   const stopSpeech = useCallback(() => {
+    cleanupAudio();
     window.speechSynthesis.cancel();
-    setIsSpeaking(false);
-    setIsPaused(false);
-  }, []);
+    setIsSpeaking(false); setIsPaused(false);
+  }, [cleanupAudio]);
 
   // Fallback icon inference when LLM omits icon (broad library heuristic)
   const inferIcon = (label = "") => {
@@ -466,6 +580,46 @@ export default function App() {
                 <button onClick={() => setSelectedNodeId(null)} className="text-violet-600 hover:text-violet-800 underline ml-2">Clear</button>
               </div>
             )}
+            {/* Voice selector — selectable, no-budget hybrid */}
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700">
+                <Mic size={12} className="text-violet-600" /> Voice
+                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${ttsMode === "qwen" && ttsAvailable ? "bg-violet-600 text-white" : "bg-white border border-slate-200 text-slate-500"}`}>
+                  {ttsMode === "qwen" && ttsAvailable ? "Qwen Neural" : "Browser Free"}
+                </span>
+                <Settings2 size={10} className="ml-auto text-slate-400" />
+              </div>
+              <div className="mt-2 flex gap-1.5">
+                <button
+                  onClick={() => setTtsMode("browser")}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition ${ttsMode === "browser" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                >
+                  Browser
+                </button>
+                <button
+                  onClick={() => { if (ttsAvailable) setTtsMode("qwen"); else toast.info("Qwen requires DASHSCOPE_API_KEY", { description: "Set it in backend/.env to enable 9 neural voices — currently using free browser voices." }); }}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition ${ttsMode === "qwen" ? "bg-violet-600 text-white border-violet-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"} ${!ttsAvailable ? "opacity-50" : ""}`}
+                  title={ttsAvailable ? "9 Qwen neural voices" : "Add DASHSCOPE_API_KEY to enable"}
+                >
+                  Qwen {ttsAvailable ? "●" : "○"}
+                </button>
+              </div>
+              <select
+                value={selectedVoice}
+                onChange={(e) => setSelectedVoice(e.target.value)}
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500"
+              >
+                {ttsMode === "qwen"
+                  ? qwenVoices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)
+                  : browserVoices.length
+                    ? browserVoices.map((v) => <option key={v.name + v.voiceURI} value={v.name}>{v.name} — {v.lang}</option>)
+                    : QWEN_FALLBACK.map((v) => <option key={v.id} value={v.id}>{v.label} (fallback)</option>)
+                }
+              </select>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+                {ttsMode === "qwen" && !ttsAvailable ? "Add DASHSCOPE_API_KEY in backend/.env — no budget? Keep Browser (free, instant)." : ttsMode === "qwen" ? "Neural: Ryan/Aiden for EN, Vivian/Serena for CN. Streaming 97ms when key set." : "Free: uses your device voices. Instant, offline, no key."}
+              </p>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-0">
