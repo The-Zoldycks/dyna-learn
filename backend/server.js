@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { createRequire } from "node:module";
-import fs from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
@@ -40,8 +40,20 @@ const EDGE_VOICE_FALLBACK = [
 ];
 
 // Middleware
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: FRONTEND_URL,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
 }));
 app.use(express.json());
 
@@ -330,12 +342,12 @@ app.post("/api/tts", async (req, res) => {
     const trimmed = text.slice(0, 5000);
     if (trimmed.length !== text.length) console.log(`[tts] truncated ${text.length} -> 5000 chars`);
     console.log(`[tts] synthesize voice=${voice} len=${trimmed.length}`);
-    // node-edge-tts writes to file, so create temp file
+    // node-edge-tts writes to file, so create temp file — use async read to avoid blocking event loop
     const tmpPath = path.join(os.tmpdir(), `dyna-tts-${crypto.randomUUID()}.mp3`);
     const ttsEngine = new EdgeTTS({ voice, rate, volume, pitch });
     await ttsEngine.ttsPromise(trimmed, tmpPath);
-    const audioBuffer = fs.readFileSync(tmpPath);
-    try { fs.unlinkSync(tmpPath); } catch {}
+    const audioBuffer = await fs.readFile(tmpPath);
+    await fs.unlink(tmpPath).catch(() => {});
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("X-TTS-Voice", voice);
@@ -350,8 +362,8 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Dyna-learn backend running on http://localhost:${PORT}`);
-  console.log(`CORS enabled for: ${FRONTEND_URL}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Dyna-learn backend running on http://0.0.0.0:${PORT}`);
+  console.log(`CORS allowed origins: ${allowedOrigins.join(", ")}`);
   console.log(`TTS mode: edge-tts self-hosted (in-process, no fetch, same as Toolbox-backend)`);
 });

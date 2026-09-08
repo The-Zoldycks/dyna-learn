@@ -32,6 +32,8 @@ const initialNodes = [
 
 const initialEdges = [];
 
+const API_BASE = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -60,7 +62,7 @@ export default function App() {
 
   useEffect(() => {
     // Unified voices: Edge Neural (top, fetched from self-hosted backend) + Browser Offline (bottom)
-    fetch("http://localhost:3000/api/tts/voices")
+    fetch(`${API_BASE}/api/tts/voices`)
       .then((r) => r.json())
       .then((data) => {
         if (data.voices?.length) setEdgeVoices(data.voices);
@@ -115,7 +117,7 @@ export default function App() {
     try {
       cleanupAudio(); window.speechSynthesis.cancel();
       setIsSpeaking(true); setIsPaused(false);
-      const res = await fetch("http://localhost:3000/api/tts", {
+      const res = await fetch(`${API_BASE}/api/tts`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.slice(0, 5000), voice: selectedVoice }),
       });
@@ -332,7 +334,7 @@ export default function App() {
   const executeTutor = useCallback(async (payload, retryLabel) => {
     setLoading(true); setError(""); lastPayloadRef.current = payload;
     try {
-      const res = await fetch("http://localhost:3000/api/tutor", {
+      const res = await fetch(`${API_BASE}/api/tutor`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
       if (!res.ok) {
