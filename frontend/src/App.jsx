@@ -511,7 +511,7 @@ export default function App() {
 
   // ---- Main tutor call ----
   const executeTutor = useCallback(async (payload, retryLabel) => {
-    setLoading(true); setError(""); lastPayloadRef.current = payload;
+    setLoading(true); lastPayloadRef.current = payload;
     try {
       const res = await fetch(`${API_BASE}/api/tutor`, {
         method: "POST",

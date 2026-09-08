@@ -403,6 +403,5 @@ app.post("/api/tts", async (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Dyna-learn backend running on http://0.0.0.0:${PORT}`);
-  console.log(`CORS allowed origins: ${allowedOrigins.join(", ")}`);
   console.log(`TTS mode: edge-tts self-hosted (in-process, no fetch, same as Toolbox-backend)`);
 });
