@@ -40,20 +40,8 @@ const EDGE_VOICE_FALLBACK = [
 ];
 
 // Middleware
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  process.env.FRONTEND_URL
-].filter(Boolean);
-
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  }
+  origin: '*' // Allow all origins for the public API
 }));
 app.use(express.json({ limit: '10mb' }));
 

@@ -1001,7 +1001,6 @@ export default function App() {
                     : <option value="">Default system voice</option>}
                 </optgroup>
               </select>
-              <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">Top: neural Edge (no cold start). Bottom: offline device voices.</p>
             </div>
           </div>
 
