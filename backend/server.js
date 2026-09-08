@@ -85,6 +85,19 @@ app.post("/api/tutor", async (req, res) => {
     // Support both legacy flowchartState and new canvasState (monorepo contract)
     const effectiveCanvas = canvasState || flowchartState || { nodes: [], edges: [] };
 
+    // Cap canvas to the most-recent 30 nodes before injecting into the system prompt.
+    // Large canvases (100+ nodes) can exhaust context tokens silently; pruning keeps
+    // the model focused and within safe limits. The full canvas is still used for
+    // selectedNodeId resolution below.
+    const CANVAS_NODE_LIMIT = 30;
+    const canvasForPrompt = {
+      nodes: (effectiveCanvas.nodes || []).slice(-CANVAS_NODE_LIMIT),
+      edges: effectiveCanvas.edges || [],
+    };
+    if ((effectiveCanvas.nodes || []).length > CANVAS_NODE_LIMIT) {
+      console.warn(`[tutor] canvas truncated ${effectiveCanvas.nodes.length} → ${CANVAS_NODE_LIMIT} nodes for prompt`);
+    }
+
     // Sliding window: retain last 6 conversation turns (3 user prompts + 3 AI responses)
     // chatHistory expected as array of {role: "user"|"model", text: string} or {role, content}
     const normalizedHistory = (Array.isArray(chatHistory) ? chatHistory : []).map((entry) => ({
@@ -212,7 +225,7 @@ app.post("/api/tutor", async (req, res) => {
     const systemInstruction = `You are Dyna-learn, an interactive AI tutor operating as an asynchronous state generator in a decoupled React + Express architecture.
 
 Context you MUST use:
-- CanvasState (ReactFlow current nodes/edges — positions are auto-calculated, ignore x/y): ${JSON.stringify(effectiveCanvas)}
+- CanvasState (ReactFlow current nodes/edges — positions are auto-calculated, ignore x/y): ${JSON.stringify(canvasForPrompt)}
 - ${selectedNodeText}
 - ChatHistory (sliding window last 6 turns, 3 user + 3 AI): 
 ${historyText}

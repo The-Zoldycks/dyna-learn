@@ -1,4 +1,5 @@
-import { X, Volume2, Pause, Play, Square, Sparkles } from "lucide-react";
+import { X, Volume2, Pause, Play, Square, Sparkles, Loader2 } from "lucide-react";
+import SimpleMarkdown from "./SimpleMarkdown.jsx";
 
 export default function ExplanationDrawer({
   open,
@@ -10,8 +11,17 @@ export default function ExplanationDrawer({
   onStop,
   isSpeaking,
   isPaused,
+  isTTSLoading = false,
 }) {
   if (!open) return null;
+
+  const statusLabel = isTTSLoading
+    ? "Loading audio…"
+    : isSpeaking
+    ? isPaused
+      ? "Paused"
+      : "Speaking…"
+    : "Ready to replay";
 
   return (
     <>
@@ -32,7 +42,7 @@ export default function ExplanationDrawer({
             </div>
             <div>
               <h3 className="text-sm font-semibold text-slate-900 leading-none">Tutor Explanation</h3>
-              <p className="text-xs text-slate-500">{isSpeaking ? (isPaused ? "Paused" : "Speaking...") : "Ready to replay"}</p>
+              <p className="text-xs text-slate-500">{statusLabel}</p>
             </div>
           </div>
           <button
@@ -46,7 +56,11 @@ export default function ExplanationDrawer({
 
         {/* Audio controls */}
         <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2 shrink-0">
-          {!isSpeaking ? (
+          {isTTSLoading ? (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-violet-100 text-violet-700 text-xs font-medium">
+              <Loader2 size={14} className="animate-spin" /> Loading audio…
+            </div>
+          ) : !isSpeaking ? (
             <button
               onClick={onReplay}
               className="flex items-center gap-2 px-4 py-2 rounded-full bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 transition"
@@ -77,12 +91,19 @@ export default function ExplanationDrawer({
           <span className="ml-auto text-xs text-slate-400">{speechText?.length || 0} chars</span>
         </div>
 
-        {/* Content - wide measure, scrollable */}
+        {/* Content — wide measure, scrollable, with markdown rendering */}
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <article className="prose prose-sm max-w-none prose-slate">
-            <p className="text-[15px] leading-7 text-slate-800 whitespace-pre-wrap break-words">
-              {speechText || "No explanation yet. Ask a question to generate one."}
-            </p>
+            {speechText ? (
+              <SimpleMarkdown
+                text={speechText}
+                className="text-[15px] leading-7 text-slate-800"
+              />
+            ) : (
+              <p className="text-[15px] leading-7 text-slate-400">
+                No explanation yet. Ask a question to generate one.
+              </p>
+            )}
           </article>
         </div>
 
