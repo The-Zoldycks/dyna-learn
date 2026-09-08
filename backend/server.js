@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import rateLimit from "express-rate-limit";
 import { GoogleGenAI } from "@google/genai";
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
@@ -39,11 +40,42 @@ const EDGE_VOICE_FALLBACK = [
   { id: "ko-KR-SunHiNeural", label: "SunHi — Young female (KR)", lang: "Korean", locale: "ko-KR" },
 ];
 
-// Middleware
+// Middleware — allowlist (prod URLs hardcoded so a misconfigured FRONTEND_URL env can't lock out Vercel)
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://dyna-learn.vercel.app',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: '*' // Allow all origins for the public API
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
 }));
 app.use(express.json({ limit: '10mb' }));
+
+// Per-IP rate limiting — second layer behind CORS so a hotlinked key can't burn Gemini quota
+const tutorLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: "Too many tutor requests — wait a minute and retry.", code: "TUTOR_RATE_LIMIT" },
+});
+const ttsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: "Too many TTS requests — wait a minute and retry.", code: "TTS_RATE_LIMIT" },
+});
+app.use("/api/tutor", tutorLimiter);
+app.use("/api/tts", ttsLimiter);
 
 // Initialize Gemini client
 const ai = new GoogleGenAI({
