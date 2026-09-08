@@ -76,7 +76,7 @@ export default function App() {
   const [lastSpeech, setLastSpeech] = useState("");
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [error, setError] = useState("");
+
   const [chatHistory, setChatHistory] = useState(() => sessionRead(SESSION_CHAT, []));
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -562,7 +562,7 @@ export default function App() {
       const description = isRateLimit
         ? "Gemini free-tier limit hit — wait ~20s before retrying."
         : err.message || "Failed to fetch tutor response";
-      setError(err.message || "Failed to fetch tutor response");
+
       toast.error(isRateLimit ? "Rate limit hit" : "Tutor unavailable", {
         description,
         duration: Infinity,
@@ -611,7 +611,7 @@ export default function App() {
   const handleClear = () => {
     setNodes(initialNodes); setEdges(initialEdges); setChatHistory([]); setSelectedNodeId(null);
     stopSpeech(); setLastSpeech(""); setDrawerText(""); setDrawerOpen(false);
-    setError(""); setExpandedIds(new Set()); lastPayloadRef.current = null;
+    setExpandedIds(new Set()); lastPayloadRef.current = null;
     setSelectedImage(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     sessionClear(); // also wipe sessionStorage
@@ -1180,14 +1180,6 @@ export default function App() {
               )}
             </form>
 
-            {/* Error banner */}
-            {error && (
-              <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-3">
-                <p className="font-semibold">Tutor error</p>
-                <p className="mt-1 break-words">{error}</p>
-                <button onClick={() => setError("")} className="mt-2 text-xs underline">Dismiss</button>
-              </div>
-            )}
 
             {/* Last-speech mini-player */}
             {lastSpeech && !drawerOpen && (
