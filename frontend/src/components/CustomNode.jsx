@@ -34,37 +34,37 @@ export default function CustomNode({ data, selected }) {
   const isHighlighted = data.highlight === true;
   const shape = data.shape || "rectangle";
 
-  const base = "relative flex items-center gap-2.5 px-3.5 py-3 min-w-[150px] max-w-[200px] text-sm font-medium transition-all";
+  const base = "relative flex items-center gap-3 px-4 py-3 min-w-[160px] max-w-[220px] text-sm font-medium transition-all duration-300 ease-out";
 
   const variants = {
-    rectangle: "rounded-xl",
+    rectangle: "rounded-2xl",
     pill: "rounded-full px-5",
-    diamond: "rounded-lg rotate-0", // diamond via outer rotate, inner counter-rotate if needed
-    circle: "rounded-full w-[120px] h-[120px] justify-center flex-col gap-1",
+    diamond: "rounded-2xl", // Removed literal diamond clip-path, opting for sleek rounded squares for everything
+    circle: "rounded-full w-[130px] h-[130px] justify-center flex-col gap-1.5",
   };
 
   const stateStyle = isHighlighted
-    ? "bg-red-50 border-2 border-red-500 text-red-700 shadow-[0_4px_16px_rgba(239,68,68,0.3)]"
+    ? "bg-white border border-rose-300 text-rose-800 shadow-[0_4px_24px_rgba(244,63,94,0.2)] ring-4 ring-rose-500/20 animate-[pulse_3s_ease-in-out_infinite]"
     : selected
-    ? "bg-violet-50 border-2 border-violet-600 text-violet-900 shadow-[0_4px_16px_rgba(124,58,237,0.2)]"
-    : "bg-white border-2 border-indigo-400 text-slate-800 shadow-[0_4px_12px_rgba(0,0,0,0.08)] hover:shadow-[0_6px_16px_rgba(0,0,0,0.12)] hover:border-indigo-500";
+    ? "bg-white border border-violet-400 text-violet-900 shadow-lg ring-4 ring-violet-500/10 scale-[1.02]"
+    : "bg-white/90 backdrop-blur-md border border-slate-200/80 text-slate-700 shadow-sm hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5";
 
-  // Diamond outer wrapper would rotate, but keep simple for now: use chamfer via clip-path alternative
-  const diamondStyle = shape === "diamond" ? { clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)", padding: "18px 12px", minWidth: 140 } : {};
+  // Diamond clip path feels outdated in a modern spatial UI, we ignore shape=diamond and just use rounded-2xl
+  const diamondStyle = {};
 
   return (
     <div
       className={`${base} ${variants[shape] || variants.rectangle} ${stateStyle}`}
       style={diamondStyle}
-      title={isHighlighted ? "Highlighted — student confusion detected (update_nodes highlight:true). Review this concept." : undefined}
+      title={isHighlighted ? "Highlighted — student confusion detected. Review this concept." : undefined}
     >
-      <Handle type="target" position={Position.Top} style={{ background: isHighlighted ? "#ef4444" : "#6366f1", width: 8, height: 8 }} />
-      <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${isHighlighted ? "bg-red-100" : selected ? "bg-violet-100" : "bg-indigo-50"}`}>
-        <Icon size={16} className={isHighlighted ? "text-red-600" : selected ? "text-violet-600" : "text-indigo-600"} />
+      <Handle type="target" position={Position.Top} className="!bg-slate-300 !w-2 !h-2 !border-none !-top-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
+      <div className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${isHighlighted ? "bg-rose-100/80" : selected ? "bg-violet-100/80" : "bg-slate-100"}`}>
+        <Icon size={16} className={isHighlighted ? "text-rose-600" : selected ? "text-violet-600" : "text-slate-600"} strokeWidth={2.5} />
       </div>
-      <span className="flex-1 leading-tight text-[13px] text-center whitespace-pre-wrap break-words">{data.label}</span>
-      {isHighlighted && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-red-500 rounded-full animate-pulse border-2 border-white" aria-label="Highlighted" />}
-      <Handle type="source" position={Position.Bottom} style={{ background: isHighlighted ? "#ef4444" : "#6366f1", width: 8, height: 8 }} />
+      <span className="flex-1 leading-snug text-[13px] tracking-tight whitespace-pre-wrap break-words">{data.label}</span>
+      {isHighlighted && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white" aria-label="Highlighted" />}
+      <Handle type="source" position={Position.Bottom} className="!bg-slate-300 !w-2 !h-2 !border-none !-bottom-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
     </div>
   );
 }

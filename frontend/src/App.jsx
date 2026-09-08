@@ -7,19 +7,23 @@ import {
   useNodesState,
   useEdgesState,
   addEdge,
+  Panel,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   Pause, Play, Square, ChevronDown, ChevronUp, Maximize2, X, Mic,
-  MessageSquare, Network,
+  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
 import ExplanationDrawer from "./components/ExplanationDrawer.jsx";
 import ChatSkeleton from "./components/ChatSkeleton.jsx";
 import SimpleMarkdown from "./components/SimpleMarkdown.jsx";
+import QuizCard from "./components/QuizCard.jsx";
+import JournalModal from "./components/JournalModal.jsx";
 import { getLayoutedElements } from "./utils/layout.js";
+import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
 
 const nodeTypes = { custom: CustomNode };
 
@@ -84,12 +88,42 @@ export default function App() {
   const [selectedVoice, setSelectedVoice] = useState(
     () => localStorage.getItem("dyna-voice") || "en-US-AriaNeural"
   );
+  const [isListening, setIsListening] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [activeReviewId, setActiveReviewId] = useState(null);
+  const [selectedImage, setSelectedImage] = useState(null);
+
+  const recognitionRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const lastPayloadRef = useRef(null);
   const audioRef = useRef(null);
   const audioUrlRef = useRef(null);
   const reactFlowInstanceRef = useRef(null); // imperative fitView
   const chatBottomRef = useRef(null);         // auto-scroll sentinel
+
+  useEffect(() => {
+    updateStreakOnLoad();
+  }, []);
+
+  // ---- Share URL parsing on mount ----
+  useEffect(() => {
+    if (window.location.hash.startsWith("#s=")) {
+      try {
+        const payload = window.location.hash.slice(3);
+        const jsonStr = decodeURIComponent(escape(window.atob(payload)));
+        const data = JSON.parse(jsonStr);
+        if (data.nodes) setNodes(data.nodes);
+        if (data.edges) setEdges(data.edges);
+        // Strip hash cleanly without refreshing
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        toast.success("Shared canvas loaded!", { duration: 3000 });
+      } catch (err) {
+        toast.error("Failed to load shared canvas", { description: "Link might be corrupted or too long." });
+        console.error("Share decode error:", err);
+      }
+    }
+  }, [setNodes, setEdges]);
 
   // ---- React Flow callbacks ----
   const onConnect = useCallback(
@@ -350,8 +384,21 @@ export default function App() {
           const map = new Map(prev.map((n) => [n.id, n]));
           formattedNodes.forEach((n) => {
             const existing = map.get(n.id);
-            if (existing) map.set(n.id, { ...existing, data: { ...existing.data, ...n.data } });
-            else map.set(n.id, n);
+            if (existing) {
+              const updatedData = { ...existing.data, ...n.data };
+              map.set(n.id, { ...existing, data: updatedData });
+              
+              // Log confusion to SRS
+              if (n.data?.highlight && updatedData.label) {
+                logHighlightToSRS(n.id, updatedData.label);
+              }
+            }
+            else {
+              map.set(n.id, n);
+              if (n.data?.highlight && n.data?.label) {
+                logHighlightToSRS(n.id, n.data.label);
+              }
+            }
           });
           return Array.from(map.values());
         });
@@ -481,20 +528,28 @@ export default function App() {
       }
 
       const data = await res.json();
-      const { speech_text, diagram_update } = data; // FIX #1: was `diagramUpdate` (undefined)
+      const { speech_text, diagram_update, quiz } = data;
 
-      if (speech_text) {
-        speakText(speech_text);
-        setDrawerText(speech_text); setDrawerOpen(true);
+      if (speech_text || quiz) {
+        if (speech_text) {
+          speakText(speech_text);
+          setDrawerText(speech_text); setDrawerOpen(true);
+        }
         setChatHistory((prev) => {
-          const next = [...prev, { role: "user", text: payload.studentQuestion }, { role: "model", text: speech_text }];
+          const next = [
+            ...prev,
+            { role: "user", text: payload.studentQuestion, image: payload.image?.dataUrl || null },
+            { role: "model", text: speech_text || "", quiz: quiz || null }
+          ];
           return next.slice(-6);
         });
       } else {
-        setChatHistory((prev) => [...prev, { role: "user", text: payload.studentQuestion }].slice(-6));
+        setChatHistory((prev) => [...prev, { role: "user", text: payload.studentQuestion, image: payload.image?.dataUrl || null }].slice(-6));
       }
 
-      if (diagram_update) applyDiagramUpdateStable(diagram_update); // FIX #1 applied
+      if (diagram_update && diagram_update.action !== "quiz") {
+        applyDiagramUpdateStable(diagram_update);
+      }
       if (retryLabel) toast.dismiss();
       return true;
     } catch (err) {
@@ -527,28 +582,280 @@ export default function App() {
   // ---- Form submit ----
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!question.trim() || loading) return;
+    if (!question.trim() && !selectedImage || loading) return;
     const canvasState = { nodes, edges };
+    
+    // Strip image dataUrl from previous turns to save tokens and payload size
+    const cleanHistory = chatHistory.map(turn => {
+      if (!turn.image) return turn;
+      const { image, ...rest } = turn;
+      return rest;
+    });
+
     const payload = {
-      studentQuestion: question,
+      studentQuestion: question.trim() || "What's in this image?",
       canvasState,
       flowchartState: canvasState, // legacy compat
-      chatHistory,
+      chatHistory: cleanHistory,
       selectedNodeId,
+      image: selectedImage ? { base64: selectedImage.base64, mimeType: selectedImage.mimeType, dataUrl: selectedImage.dataUrl } : null,
     };
     const ok = await executeTutor(payload);
-    if (ok) setQuestion("");
+    if (ok) {
+      setQuestion("");
+      setSelectedImage(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const handleClear = () => {
     setNodes(initialNodes); setEdges(initialEdges); setChatHistory([]); setSelectedNodeId(null);
     stopSpeech(); setLastSpeech(""); setDrawerText(""); setDrawerOpen(false);
     setError(""); setExpandedIds(new Set()); lastPayloadRef.current = null;
+    setSelectedImage(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
     sessionClear(); // also wipe sessionStorage
     toast.success("Canvas cleared", { duration: 3000, description: "Welcome node restored — ask a new question" });
   };
 
   const handleReplay = () => { if (lastSpeech) speakText(lastSpeech); };
+
+  const handleExportSVG = useCallback(async () => {
+    const instance = reactFlowInstanceRef.current;
+    if (!instance) return;
+
+    const exportNodes = instance.getNodes();
+    const exportEdges = instance.getEdges();
+    if (exportNodes.length === 0) return;
+
+    try {
+      toast.loading("Generating SVG…", { id: "export" });
+
+      // ── Compute bounding box ──────────────────────────────────────────────
+      const PAD = 48;
+      const xs = exportNodes.map((n) => n.position.x);
+      const ys = exportNodes.map((n) => n.position.y);
+      const ws = exportNodes.map((n) => n.measured?.width  || 172);
+      const hs = exportNodes.map((n) => n.measured?.height || 64);
+      const minX = Math.min(...xs) - PAD;
+      const minY = Math.min(...ys) - PAD;
+      const maxX = Math.max(...xs.map((x, i) => x + ws[i])) + PAD;
+      const maxY = Math.max(...ys.map((y, i) => y + hs[i])) + PAD;
+      const W = maxX - minX;
+      const H = maxY - minY;
+
+      // ── Color helpers ─────────────────────────────────────────────────────
+      const nodeColor = (n) =>
+        n.data?.highlight ? { fill: "#fef2f2", stroke: "#ef4444", text: "#b91c1c" }
+        : { fill: "#ffffff", stroke: "#818cf8", text: "#1e293b" };
+
+      // ── Edge SVG ──────────────────────────────────────────────────────────
+      const edgeSvg = exportEdges.map((e) => {
+        const src = exportNodes.find((n) => n.id === e.source);
+        const tgt = exportNodes.find((n) => n.id === e.target);
+        if (!src || !tgt) return "";
+        const sw = src.measured?.width  || 172;
+        const sh = src.measured?.height || 64;
+        const tw = tgt.measured?.width  || 172;
+        const th = tgt.measured?.height || 64;
+        // Bottom-centre of source → top-centre of target
+        const x1 = (src.position.x + sw / 2) - minX;
+        const y1 = (src.position.y + sh)      - minY;
+        const x2 = (tgt.position.x + tw / 2)  - minX;
+        const y2 = (tgt.position.y)            - minY;
+        const cy = (y1 + y2) / 2;
+        const path = `M${x1},${y1} C${x1},${cy} ${x2},${cy} ${x2},${y2}`;
+        const label = e.label
+          ? `<text x="${(x1 + x2) / 2}" y="${cy - 6}" text-anchor="middle" font-size="10" fill="#64748b" font-family="system-ui,sans-serif">${e.label}</text>`
+          : "";
+        return `<path d="${path}" fill="none" stroke="#818cf8" stroke-width="2"/>${label}`;
+      }).join("\n");
+
+      // ── Node SVG ──────────────────────────────────────────────────────────
+      const nodeSvg = exportNodes.map((n) => {
+        const nw = n.measured?.width  || 172;
+        const nh = n.measured?.height || 64;
+        const x  = n.position.x - minX;
+        const y  = n.position.y - minY;
+        const cx = x + nw / 2;
+        const cy = y + nh / 2;
+        const c  = nodeColor(n);
+        const label = (n.data?.label || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const lines = label.split("\n");
+        const shape = n.data?.shape || "rectangle";
+
+        let shapeEl = "";
+        if (shape === "pill") {
+          shapeEl = `<rect x="${x}" y="${y}" width="${nw}" height="${nh}" rx="${nh / 2}" ry="${nh / 2}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>`;
+        } else if (shape === "circle") {
+          const r = Math.min(nw, nh) / 2;
+          shapeEl = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>`;
+        } else if (shape === "diamond") {
+          shapeEl = `<polygon points="${cx},${y} ${x + nw},${cy} ${cx},${y + nh} ${x},${cy}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>`;
+        } else {
+          shapeEl = `<rect x="${x}" y="${y}" width="${nw}" height="${nh}" rx="10" ry="10" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>`;
+        }
+
+        // Multi-line label
+        const lineH  = 14;
+        const startY = cy - ((lines.length - 1) * lineH) / 2;
+        const textEl = lines.map((ln, i) =>
+          `<text x="${cx}" y="${startY + i * lineH}" text-anchor="middle" dominant-baseline="middle" font-size="12" font-weight="500" fill="${c.text}" font-family="system-ui,sans-serif">${ln}</text>`
+        ).join("\n");
+
+        // Highlight pulse indicator dot
+        const dot = c.stroke === "#ef4444"
+          ? `<circle cx="${x + nw - 5}" cy="${y + 5}" r="4" fill="#ef4444"/>`
+          : "";
+
+        return `${shapeEl}\n${textEl}\n${dot}`;
+      }).join("\n");
+
+      // ── Compose full SVG ──────────────────────────────────────────────────
+      const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <!-- Edges -->
+  ${edgeSvg}
+  <!-- Nodes -->
+  ${nodeSvg}
+  <!-- Footer -->
+  <text x="${W - 12}" y="${H - 10}" text-anchor="end" font-size="10" fill="#94a3b8" font-family="system-ui,sans-serif">Dyna-learn · ${new Date().toLocaleDateString()}</text>
+</svg>`;
+
+      // ── Trigger download ──────────────────────────────────────────────────
+      const blob   = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+      const url    = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.download = `dyna-learn-${Date.now()}.svg`;
+      anchor.href = url;
+      anchor.click();
+      URL.revokeObjectURL(url);
+
+      toast.success("Diagram exported as SVG!", { id: "export", duration: 2500 });
+    } catch (err) {
+      console.error("Export failed:", err);
+    }
+  }, []);
+
+  // ---- Voice Input -----------------------------------------------------
+  const handleVoiceStart = useCallback((e) => {
+    e.preventDefault();
+    if (loading) return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error("Voice input not supported in this browser.");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setQuestion(transcript);
+    };
+    recognition.onerror = (event) => {
+      console.error("Speech recognition error", event.error);
+      setIsListening(false);
+    };
+    recognition.onend = () => setIsListening(false);
+    
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [loading]);
+
+  const handleVoiceStop = useCallback((e) => {
+    e.preventDefault();
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
+    }
+  }, [isListening]);
+
+  const handleImageChange = useCallback((e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be under 5MB for the Gemini API.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      const base64 = result.split(',')[1];
+      setSelectedImage({
+        dataUrl: result,
+        base64: base64,
+        mimeType: file.type
+      });
+    };
+    reader.readAsDataURL(file);
+    // Reset file input so same file can be selected again if needed
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  const handleShare = useCallback(() => {
+    if (nodes.length <= 1) return;
+    try {
+      const payload = {
+        nodes: nodes.map(n => ({ id: n.id, data: n.data, position: n.position, type: n.type })),
+        edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, label: e.label }))
+      };
+      // Minimal zero-dependency base64 string for URL hash
+      const jsonStr = JSON.stringify(payload);
+      const b64 = window.btoa(unescape(encodeURIComponent(jsonStr)));
+      
+      const url = `${window.location.origin}${window.location.pathname}#s=${b64}`;
+      if (url.length > 4000) {
+        throw new Error("Canvas is too large to share via URL link. Try taking a snapshot instead.");
+      }
+      
+      navigator.clipboard.writeText(url).then(() => {
+        toast.success("Share link copied to clipboard!", { description: "Anyone with this link can continue the lesson." });
+      });
+    } catch (err) {
+      console.error("Share failed", err);
+      toast.error("Failed to generate share link");
+    }
+  }, [nodes, edges]);
+
+  // ---- Retention Engine Handlers -----------------------------------------
+  const handleSaveSnapshot = useCallback(() => {
+    const title = window.prompt("Enter a title for this lesson (e.g. 'Database Normalization'):");
+    if (!title) return;
+    try {
+      saveSnapshot(title, nodes, edges, chatHistory);
+      toast.success(`Lesson "${title}" saved to Journal!`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }, [nodes, edges, chatHistory]);
+
+  const handleLoadSnapshot = useCallback((snap) => {
+    if (!confirm(`Load "${snap.title}"? Current unsaved progress will be lost.`)) return;
+    setNodes(snap.nodes || []);
+    setEdges(snap.edges || []);
+    setChatHistory(snap.chatHistory || []);
+    setJournalOpen(false);
+    toast.success(`Loaded "${snap.title}"`);
+    setTimeout(() => triggerFitView(), 100);
+  }, [setNodes, setEdges, triggerFitView]);
+
+  const handleStartReview = useCallback((srsItem) => {
+    setJournalOpen(false);
+    setActiveReviewId(srsItem.id);
+    const q = `I need to review the concept: "${srsItem.label}". Please quiz me on it using the 'quiz' action. Ensure it is multiple choice.`;
+    executeTutor({ studentQuestion: q, nodes, edges }, true);
+  }, [executeTutor, nodes, edges]);
+
+  const handleQuizComplete = useCallback((passed, turnIdx) => {
+    if (activeReviewId) {
+      updateSRSItem(activeReviewId, passed);
+      setActiveReviewId(null);
+      toast.success(passed ? "Great job! Review interval increased." : "Keep studying! Review scheduled for tomorrow.", { icon: passed ? "🎉" : "💪" });
+    }
+  }, [activeReviewId]);
 
   // ---- Derived state ----
   const selectedNodeLabel = useMemo(
@@ -560,49 +867,94 @@ export default function App() {
 
   // ---- JSX ----
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-slate-50 to-indigo-50 text-slate-900">
-      {/* ── Header ── */}
-      <header className="flex items-center justify-between px-4 sm:px-6 py-3 bg-white border-b border-slate-200 shadow-sm shrink-0">
-        <div className="flex items-center gap-3">
-          <img
-            src="/dyna-learn-logo-blue.png"
-            alt="Dyna-learn logo"
-            className="h-16 object-contain contrast-125 saturate-150 brightness-[0.97] drop-shadow-[0_2px_6px_rgba(0,0,0,0.2)]"
-            style={{ filter: "contrast(1.55) saturate(1.3) brightness(0.96)" }}
-          />
-          <div className="hidden sm:block border-l border-slate-200 pl-3 ml-1">
-            <h1 className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase leading-none">Interactive AI Tutor</h1>
-            <p className="text-[11px] text-slate-400">Learn by asking</p>
-          </div>
+    <div className="relative h-screen w-screen overflow-hidden bg-[#fafafa] text-slate-900 font-sans antialiased">
+      
+      {/* ── Background Canvas (z-0) ── */}
+      <div className={`absolute inset-0 z-0 transition-opacity ${mobileTab === "chat" ? "opacity-0 pointer-events-none sm:opacity-100 sm:pointer-events-auto" : "opacity-100"}`}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          nodeTypes={nodeTypes}
+          onNodeClick={(_, n) => setSelectedNodeId(n.id)}
+          onPaneClick={() => setSelectedNodeId(null)}
+          onInit={(inst) => (reactFlowInstanceRef.current = inst)}
+          fitView
+          minZoom={0.2}
+          maxZoom={1.5}
+          className="bg-slate-50"
+        >
+          <Background color="#cbd5e1" gap={24} size={1.5} />
+          <Controls className="bg-white/90 backdrop-blur border-slate-200 shadow-sm" />
+          
+          {/* Floating Action Bar (Canvas Controls) */}
+          <Panel position="bottom-right" className="flex items-center gap-2 mb-[60px] sm:mb-2 mr-2">
+            <button
+              onClick={handleShare}
+              disabled={nodes.length <= 1}
+              className="flex items-center gap-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-full px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Network size={14} className="text-violet-600" /> Share
+            </button>
+            <button
+              onClick={handleExportSVG}
+              disabled={nodes.length <= 1}
+              title="Download diagram as SVG"
+              className="flex items-center gap-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-full px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Download size={14} className="text-violet-600" /> Export
+            </button>
+          </Panel>
+
+          {/* Highlight legend */}
+          {hasHighlightedNodes && (
+            <Panel position="bottom-left" className="ml-[420px] mb-4 hidden sm:flex items-center gap-2 bg-white/90 backdrop-blur border border-rose-200 rounded-full px-4 py-2 text-xs font-medium text-rose-700 shadow-sm pointer-events-none">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0 border border-white" />
+              Highlighted — confusion detected
+            </Panel>
+          )}
+        </ReactFlow>
+      </div>
+
+      {/* ── Floating Logo (Top Left) ── */}
+      <div className="absolute top-5 left-5 z-20 hidden lg:flex items-center gap-3 bg-white/80 backdrop-blur-xl px-4 py-2.5 rounded-2xl shadow-sm border border-slate-200/60 pointer-events-none">
+        <img src="/dyna-learn-logo-blue.png" alt="Dyna-learn" className="h-8 object-contain contrast-125 saturate-150" />
+        <div className="border-l border-slate-300 pl-3">
+          <h1 className="text-[11px] font-bold tracking-widest text-slate-800 uppercase leading-none">Interactive Tutor</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={drawerText ? () => setDrawerOpen((v) => !v) : handleReplay}
-            disabled={!drawerText && !lastSpeech}
-            className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-medium disabled:opacity-40 hover:bg-slate-50 transition"
-          >
-            {drawerOpen ? <X size={14} /> : <Maximize2 size={14} />}
-            {drawerOpen ? "Close" : "View"} Explanation
-          </button>
-          <div className="hidden sm:flex items-center gap-1 border border-slate-200 rounded-lg p-1 bg-white">
-            <button onClick={handleReplay} disabled={!lastSpeech || isSpeaking || isTTSLoading} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40" title="Replay"><Volume2 size={14} /></button>
-            <button onClick={isPaused ? resumeSpeech : pauseSpeech} disabled={!isSpeaking && !isPaused} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40" title={isPaused ? "Resume" : "Pause"}>{isPaused ? <Play size={14} /> : <Pause size={14} />}</button>
-            <button onClick={stopSpeech} disabled={!isSpeaking && !isPaused && !isTTSLoading} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40" title="Stop"><Square size={14} /></button>
-          </div>
-          <button
-            onClick={handleClear}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 transition"
-          >
-            <Trash2 size={14} /> Clear
-          </button>
-        </div>
+      </div>
+
+      {/* ── Floating Top Actions (Top Right) ── */}
+      <header className="absolute top-4 right-4 sm:top-5 sm:right-5 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-xl px-2 py-2 rounded-2xl shadow-sm border border-slate-200/60">
+        <button
+          onClick={() => setJournalOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
+        >
+          <BookOpen size={14} className="text-violet-600" />
+          <span className="hidden sm:inline">Journal</span>
+        </button>
+        <button
+          onClick={handleSaveSnapshot}
+          disabled={nodes.length <= 1}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50 transition shadow-sm"
+        >
+          <Save size={14} />
+          <span className="hidden sm:inline">Save</span>
+        </button>
+        <div className="w-px h-5 bg-slate-300 mx-1 hidden sm:block" />
+        <button
+          onClick={handleClear}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 text-xs font-semibold transition"
+          title="Clear Canvas"
+        >
+          <Trash2 size={14} /> <span className="hidden md:inline">Clear</span>
+        </button>
       </header>
 
-      {/* ── Main body ── */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* ── Left panel: Chat Sidebar (Floating on Desktop, Full on Mobile) ── */}
+      <div className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col bg-white/95 backdrop-blur-2xl sm:rounded-[2rem] shadow-2xl border-r sm:border border-slate-200/60 overflow-hidden transition-transform duration-300 ease-out ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
 
-        {/* ── Left panel: Chat ── */}
-        <div className={`${mobileTab === "chat" ? "flex" : "hidden"} sm:flex flex-col w-full sm:w-[380px] shrink-0 bg-white border-r border-slate-200 overflow-hidden`}>
           {/* Panel header */}
           <div className="p-4 border-b border-slate-100 shrink-0">
             <h2 className="flex items-center gap-2 font-semibold text-slate-800 text-sm">
@@ -655,9 +1007,30 @@ export default function App() {
 
           {/* Scrollable conversation + form */}
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-0">
-            {chatHistory.length > 0 && (
+            {chatHistory.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-6 mt-10">
+                <div className="w-12 h-12 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center mb-4 shadow-sm border border-violet-200/50">
+                  <Brain size={24} />
+                </div>
+                <h3 className="text-slate-800 font-semibold mb-2">Welcome to Dyna-learn</h3>
+                <p className="text-xs text-slate-500 mb-8 max-w-[200px] leading-relaxed">
+                  Start typing below, or try one of these topics to see the canvas in action.
+                </p>
+                <div className="flex flex-col gap-2 w-full">
+                  <button onClick={() => { setQuestion("Explain how a Database works."); }} className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                    Explain Database Architecture
+                  </button>
+                  <button onClick={() => { setQuestion("How does OAuth 2.0 work?"); }} className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                    How does OAuth 2.0 work?
+                  </button>
+                  <button onClick={() => { setQuestion("Draw a flowchart for the React Component Lifecycle."); }} className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                    React Component Lifecycle
+                  </button>
+                </div>
+              </div>
+            ) : (
               <div className="space-y-2">
-                <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Conversation</p>
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide px-2">Conversation</p>
                 <div className="space-y-2">
                   {chatHistory.map((turn, idx) => {
                     const isExpanded = expandedIds.has(idx);
@@ -666,32 +1039,43 @@ export default function App() {
                     return (
                       <div
                         key={idx}
-                        className={`rounded-xl px-3 py-2.5 text-xs leading-relaxed border ${
+                        className={`text-[13px] leading-relaxed ${
                           turn.role === "user"
-                            ? "bg-slate-900 text-white border-slate-800 ml-4"
-                            : "bg-violet-50 border-violet-200 text-slate-700 mr-2"
+                            ? "bg-slate-900 text-white rounded-[20px] rounded-br-sm px-4 py-3 ml-8 shadow-sm"
+                            : "text-slate-800 pr-4 mt-2 mb-4"
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-[10px] uppercase opacity-60">
-                            {turn.role === "user" ? "You" : "Tutor"}
-                          </span>
-                          {isLong && (
-                            <button
-                              onClick={() => toggleExpand(idx)}
-                              className="text-[10px] underline opacity-70 hover:opacity-100 flex items-center gap-1"
-                            >
-                              {isExpanded ? <>Less <ChevronUp size={10} /></> : <>More <ChevronDown size={10} /></>}
-                            </button>
-                          )}
-                        </div>
+                        {turn.role === "user" ? null : (
+                          <div className="flex items-center gap-2 mb-1 opacity-60">
+                            <Sparkles size={12} className="text-violet-600" />
+                            <span className="font-semibold text-[10px] uppercase tracking-wider text-violet-700">Tutor</span>
+                          </div>
+                        )}
+
                         {/* Render tutor responses with markdown, user messages as plain text */}
                         {turn.role === "model" ? (
-                          <SimpleMarkdown text={displayText} className="mt-1 text-[13px] leading-relaxed" />
+                          <>
+                            <SimpleMarkdown text={displayText} className="mt-1 text-[13px] leading-relaxed" />
+                            {turn.quiz && <QuizCard quiz={turn.quiz} onComplete={(passed) => handleQuizComplete(passed, idx)} />}
+                          </>
                         ) : (
-                          <p className="mt-1 whitespace-pre-wrap break-words">{displayText}</p>
+                          <div className="mt-1">
+                            {turn.image && (
+                              <img src={turn.image} alt="User uploaded" className="max-w-[120px] rounded mb-2 border border-slate-700/50" />
+                            )}
+                            <p className="whitespace-pre-wrap break-words">{displayText}</p>
+                          </div>
                         )}
-                        {turn.role === "model" && (
+
+                        {isLong && (
+                          <button
+                            onClick={() => toggleExpand(idx)}
+                            className={`mt-2 text-[10px] font-medium flex items-center gap-1 opacity-70 hover:opacity-100 ${turn.role === 'user' ? 'text-white' : 'text-slate-500'}`}
+                          >
+                            {isExpanded ? <>Show less <ChevronUp size={10} /></> : <>Read more <ChevronDown size={10} /></>}
+                          </button>
+                        )}
+                        {turn.role === "model" && !turn.quiz && (
                           <button
                             onClick={() => { setDrawerText(turn.text); setDrawerOpen(true); }}
                             className="mt-2 text-[11px] font-medium text-violet-600 hover:text-violet-800 flex items-center gap-1"
@@ -712,12 +1096,26 @@ export default function App() {
 
             {/* Question form */}
             <form onSubmit={handleSubmit} className="flex flex-col gap-3 sticky bottom-0 bg-white pt-2">
+              
+              {selectedImage && (
+                <div className="relative inline-block w-fit mb-[-4px]">
+                  <img src={selectedImage.dataUrl} alt="Upload preview" className="h-16 w-auto rounded-md border border-slate-200 shadow-sm" />
+                  <button
+                    type="button"
+                    onClick={() => setSelectedImage(null)}
+                    className="absolute -top-2 -right-2 bg-white rounded-full text-slate-500 hover:text-red-600 transition"
+                  >
+                    <XCircle size={16} className="fill-white" />
+                  </button>
+                </div>
+              )}
+
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={(e) => {
                   // Ctrl+Enter (or Cmd+Enter on Mac) submits
-                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !loading && question.trim()) {
+                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !loading && (question.trim() || selectedImage)) {
                     e.preventDefault();
                     handleSubmit(e);
                   }
@@ -732,15 +1130,50 @@ export default function App() {
                 aria-disabled={loading}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 focus:bg-white transition resize-none disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-slate-100"
               />
-              <button
-                type="submit"
-                disabled={loading || !question.trim()}
-                className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white font-medium text-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md"
-              >
-                {loading
-                  ? <><Loader2 size={16} className="animate-spin" /> Thinking…</>
-                  : <><Send size={16} /> Ask Tutor</>}
-              </button>
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading}
+                  title="Upload image"
+                  className="flex-none flex items-center justify-center w-12 rounded-xl border bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Image size={18} />
+                </button>
+                {(window.SpeechRecognition || window.webkitSpeechRecognition) && (
+                  <button
+                    type="button"
+                    onPointerDown={handleVoiceStart}
+                    onPointerUp={handleVoiceStop}
+                    onPointerLeave={handleVoiceStop}
+                    disabled={loading}
+                    title="Hold to speak"
+                    className={`flex-none flex items-center justify-center w-12 rounded-xl border transition ${
+                      isListening
+                        ? "bg-red-500 border-red-600 text-white animate-pulse"
+                        : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    <Mic size={18} />
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={loading || (!question.trim() && !selectedImage)}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white font-medium text-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md"
+                >
+                  {loading
+                    ? <><Loader2 size={16} className="animate-spin" /> Thinking…</>
+                    : <><Send size={16} /> Ask Tutor</>}
+                </button>
+              </div>
               {loading && (
                 <p className="text-xs text-center text-violet-600">
                   Input locked while thinking — prevents duplicate canvas updates
@@ -796,81 +1229,29 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── Right panel: Canvas ── */}
-        <div className={`${mobileTab === "canvas" ? "flex" : "hidden"} sm:flex flex-1 relative bg-slate-50 overflow-hidden`}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={onNodeClick}
-            onPaneClick={onPaneClick}
-            onInit={(instance) => { reactFlowInstanceRef.current = instance; }}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.25 }}
-            elementsSelectable
-            className="bg-slate-50"
-            proOptions={{ hideAttribution: true }}
-            defaultEdgeOptions={{ type: "smoothstep", animated: false }}
-          >
-            <Background gap={20} size={1} color="#e2e8f0" />
-            <Controls />
-            <MiniMap pannable zoomable style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0" }} />
-          </ReactFlow>
 
-          {/* Canvas empty-state hint */}
-          {nodes.length === 1 && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="bg-white/80 backdrop-blur rounded-2xl px-5 py-4 border border-slate-200 shadow-sm mt-24">
-                <p className="text-xs text-slate-500 text-center max-w-[240px]">
-                  Canvas is ready — ask about any topic and watch the diagram build itself
-                </p>
-              </div>
-            </div>
-          )}
+      {/* Explanation drawer (floating over everything) */}
+      <ExplanationDrawer
+        open={drawerOpen}
+        speechText={drawerText || lastSpeech}
+        onClose={() => setDrawerOpen(false)}
+        onReplay={handleReplay}
+        onPause={pauseSpeech}
+        onResume={resumeSpeech}
+        onStop={stopSpeech}
+        isSpeaking={isSpeaking}
+        isPaused={isPaused}
+        isTTSLoading={isTTSLoading}
+      />
 
-          {/* Node / edge counter — always visible when diagram has content */}
-          {nodes.length > 1 && (
-            <div className="absolute top-3 left-3 bg-white/95 backdrop-blur border border-slate-200 rounded-full px-3 py-1.5 text-xs text-slate-600 shadow-sm flex items-center gap-2 pointer-events-none">
-              {loading && <Loader2 size={12} className="animate-spin text-violet-600 shrink-0" />}
-              <span>{nodes.length} nodes · {edges.length} edges</span>
-            </div>
-          )}
-
-          {/* Highlight legend — appears whenever any node is highlighted */}
-          {hasHighlightedNodes && (
-            <div className="absolute bottom-16 left-3 flex items-center gap-2 bg-white/95 backdrop-blur border border-red-200 rounded-full px-3 py-1.5 text-xs text-red-700 shadow-sm pointer-events-none">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
-              Highlighted — confusion detected on this concept
-            </div>
-          )}
-
-          {/* Explanation drawer (overlays canvas) */}
-          <ExplanationDrawer
-            open={drawerOpen}
-            speechText={drawerText || lastSpeech}
-            onClose={() => setDrawerOpen(false)}
-            onReplay={handleReplay}
-            onPause={pauseSpeech}
-            onResume={resumeSpeech}
-            onStop={stopSpeech}
-            isSpeaking={isSpeaking}
-            isPaused={isPaused}
-            isTTSLoading={isTTSLoading}
-          />
-        </div>
-      </div>
-
-      {/* ── Mobile tab switcher (hidden on sm+) ── */}
-      <div className="sm:hidden flex border-t border-slate-200 bg-white shrink-0">
+      {/* ── Mobile tab switcher (floating bottom, hidden on sm+) ── */}
+      <div className="sm:hidden absolute bottom-0 left-0 right-0 z-30 flex bg-white/90 backdrop-blur-md border-t border-slate-200/60 shadow-[0_-4px_24px_rgba(0,0,0,0.05)]">
         <button
           onClick={() => setMobileTab("chat")}
           className={`flex-1 flex flex-col items-center py-2.5 text-[11px] font-medium transition ${
             mobileTab === "chat"
-              ? "text-violet-600 border-t-2 border-violet-600 -mt-px"
-              : "text-slate-500 hover:text-slate-700"
+              ? "text-violet-600 border-t-2 border-violet-600 -mt-px bg-violet-50/50"
+              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
           }`}
           aria-label="Chat panel"
         >
@@ -881,8 +1262,8 @@ export default function App() {
           onClick={() => setMobileTab("canvas")}
           className={`flex-1 flex flex-col items-center py-2.5 text-[11px] font-medium transition ${
             mobileTab === "canvas"
-              ? "text-violet-600 border-t-2 border-violet-600 -mt-px"
-              : "text-slate-500 hover:text-slate-700"
+              ? "text-violet-600 border-t-2 border-violet-600 -mt-px bg-violet-50/50"
+              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
           }`}
           aria-label="Canvas panel"
         >
@@ -890,6 +1271,13 @@ export default function App() {
           Canvas
         </button>
       </div>
+
+      <JournalModal
+        open={journalOpen}
+        onClose={() => setJournalOpen(false)}
+        onLoadSnapshot={handleLoadSnapshot}
+        onStartReview={handleStartReview}
+      />
     </div>
   );
 }

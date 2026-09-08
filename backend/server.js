@@ -55,7 +55,7 @@ app.use(cors({
     }
   }
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Initialize Gemini client
 const ai = new GoogleGenAI({
@@ -76,6 +76,7 @@ app.post("/api/tutor", async (req, res) => {
       canvasState,
       chatHistory = [],
       selectedNodeId = null,
+      image = null,
     } = req.body;
 
     if (!studentQuestion) {
@@ -130,6 +131,30 @@ app.post("/api/tutor", async (req, res) => {
           type: "string",
           description: "The tutor's spoken explanation/response to the student",
         },
+        quiz: {
+          type: "object",
+          description: "A 3-question active recall test. Present only when action is 'quiz'.",
+          properties: {
+            questions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  question: { type: "string", description: "The multiple-choice question text." },
+                  options: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Array of exactly 4 possible answers."
+                  },
+                  correct_index: { type: "integer", description: "0-based index of the correct option." },
+                  explanation: { type: "string", description: "Why the correct answer is right and others are wrong." }
+                },
+                required: ["question", "options", "correct_index", "explanation"]
+              }
+            }
+          },
+          required: ["questions"]
+        },
         diagram_update: {
           type: "object",
           description: "Instructions to update the flowchart diagram",
@@ -141,6 +166,7 @@ app.post("/api/tutor", async (req, res) => {
                 "add_edges",
                 "update_nodes",
                 "clear_canvas",
+                "quiz",
                 // legacy aliases retained for backward compatibility
                 "create",
                 "update",
@@ -149,7 +175,7 @@ app.post("/api/tutor", async (req, res) => {
                 "append",
                 "none",
               ],
-              description: "Action to perform on the diagram. Use add_nodes/add_edges/update_nodes/clear_canvas for React Flow state management.",
+              description: "Action to perform. Use quiz when the user asks to be tested. Use add_nodes/update_nodes/none for standard diagram management.",
             },
             nodes: {
               type: "array",
@@ -232,18 +258,18 @@ ${historyText}
 
 Rules:
 - Always respond with valid JSON matching the required schema.
-- speech_text: a clear, concise, encouraging explanation tailored to the student's current question AND selected node + history for personalization. If a node is selected and the question is about that node's concept, explicitly reference it. If the question is clearly about a DIFFERENT concept (e.g., user asks about Testing but selected is Concept), do NOT highlight the selected node — highlight the relevant node instead or use none.
-- diagram_update.action MUST be one of: add_nodes, add_edges, update_nodes, clear_canvas, none. Prefer these 4. Only use legacy values if you must.
-  - add_nodes: add new concept nodes to the flowchart. Provide nodes with id, label, icon (MUST be one of: ${allowedIcons.join(",")} — REQUIRED for every node), optional shape (rectangle|pill|diamond|circle). DO NOT provide position — frontend auto-layouts via dagre into a clean grid. Provide edges array to connect them. Example node: {"id":"planning","label":"Planning & Analysis","icon":"clipboard","shape":"rectangle"}. Example edge: {"id":"e1","source":"planning","target":"design","label":"next"}.
-  - add_edges: add connections between nodes (provide edges with id, source, target, optional label). Nodes optional.
-  - update_nodes: highlight or update an existing node (e.g., if student is confused about selected node, set highlight:true). Provide nodes with id and highlight flag + icon if updating. Use this ONLY when the student's confusion maps to the selected node.
+- speech_text: a clear, concise, encouraging explanation tailored to the student's current question AND selected node + history for personalization.
+- diagram_update.action MUST be one of: add_nodes, add_edges, update_nodes, clear_canvas, quiz, none.
+  - quiz: use this ONLY when the student explicitly asks to be tested or quizzed. Provide exactly 3 multiple-choice questions in the root "quiz" object. speech_text should introduce the quiz.
+  - add_nodes: add new concept nodes to the flowchart. Provide nodes with id, label, icon (MUST be one of: ${allowedIcons.join(",")}). DO NOT provide position. Provide edges array to connect them.
+  - add_edges: add connections between nodes (provide edges with id, source, target, optional label).
+  - update_nodes: highlight or update an existing node (e.g., if student is confused about selected node, set highlight:true). Use this ONLY when the student's confusion maps to the selected node.
   - clear_canvas: reset the canvas (provide empty nodes/edges).
   - none: no diagram change.
-- You may return both nodes and edges in a single update when needed (e.g., add_nodes with edges populated, frontend will append both).
-- Keep diagrams simple, incremental, and pedagogically useful. Do not recreate entire canvas unless using clear_canvas. Ideal granularity: 3-7 nodes for an overview, up to 10 for detailed breakdown.
-- If the question is unrelated to learning, gently redirect and use action none.
+- Keep diagrams simple, incremental, and pedagogically useful. Ideal granularity: 3-7 nodes for an overview, up to 10 for detailed breakdown.
 - Personalize using history: do not repeat explanations already given; build upon last 6 turns.
-- Icon guidance: clipboard=Planning/Analysis, palette=Design, code=Implementation/Code, bug=Testing/QA, rocket=Deployment/Release, wrench=Maintenance/Support, database=DB/Storage, server=Backend/API, cloud=Cloud/DevOps, lock=Security/Auth, file=Docs/Files, user=User/Actor, layers=Architecture, cog=Process, shield=Protection, book=Concept/Theory, lightbulb=Idea, network=Connection, cpu=Compute, brain=AI/Logic.`;
+- Icon guidance: clipboard=Planning, palette=Design, code=Code, bug=Testing, rocket=Deploy, wrench=Maintenance, database=DB, server=Backend, cloud=Cloud, lock=Security, file=Docs, user=User, layers=Architecture, cog=Process, shield=Protection, book=Concept, network=Connection, brain=AI.
+- If the user provides an image or screenshot, analyze it carefully to answer their question, translate it into the diagram canvas if requested, and directly address the visual contents in your speech_text.`;
 
     // Build contents array from windowed history + current question for Gemini context
     const contents = [];
@@ -258,13 +284,25 @@ Rules:
     }
 
     // Append current student question with selected node context
-    const currentPrompt = selectedNodeContext
+    const currentPromptText = selectedNodeContext
       ? `Student clicked node "${selectedNodeContext.id}" (${selectedNodeContext.label}) and asks: ${studentQuestion}`
       : `Student question: ${studentQuestion}`;
 
+    const currentParts = [{ text: currentPromptText }];
+    
+    // Inject Multimodal image if provided
+    if (image && image.base64 && image.mimeType) {
+      currentParts.push({
+        inlineData: {
+          data: image.base64,
+          mimeType: image.mimeType,
+        },
+      });
+    }
+
     contents.push({
       role: "user",
-      parts: [{ text: currentPrompt }],
+      parts: currentParts,
     });
 
     // Try primary model, fallback on 404 (new-user restriction on 2.5)
