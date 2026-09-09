@@ -907,7 +907,7 @@ export default function App() {
           className="bg-slate-50"
         >
           <Background color="#cbd5e1" gap={24} size={1.5} />
-          <Controls className="bg-white/90 backdrop-blur border-slate-200 shadow-sm" />
+          <Controls className="mb-[60px] sm:mb-0 bg-white/90 backdrop-blur border-slate-200 shadow-sm" />
           
           {/* Floating Action Bar (Canvas Controls) */}
           <Panel position="bottom-right" className="flex items-center gap-2 mb-[60px] sm:mb-2 mr-2">
@@ -974,7 +974,7 @@ export default function App() {
       </header>
 
       {/* ── Left panel: Chat Sidebar (Floating on Desktop, Full on Mobile) ── */}
-      <div className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col bg-white/95 backdrop-blur-2xl sm:rounded-[2rem] shadow-2xl border-r sm:border border-slate-200/60 overflow-hidden transition-transform duration-300 ease-out ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
+      <div className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col bg-white/95 backdrop-blur-2xl sm:rounded-[2rem] shadow-2xl border-r sm:border border-slate-200/60 overflow-hidden transition-transform duration-300 ease-out pb-[60px] sm:pb-0 ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
 
           {/* Panel header */}
           <div className="p-4 border-b border-slate-100 shrink-0">
@@ -1106,9 +1106,12 @@ export default function App() {
 
             {/* Auto-scroll sentinel */}
             <div ref={chatBottomRef} />
+          </div>
 
+          {/* Fixed bottom area: Form & Mini-player */}
+          <div className="p-4 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
             {/* Question form */}
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3 sticky bottom-0 bg-white pt-2">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
               
               {selectedImage && (
                 <div className="relative inline-block w-fit mb-[-4px]">
