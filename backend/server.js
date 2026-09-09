@@ -281,12 +281,12 @@ Rules:
 - speech_text: Provide a highly detailed, comprehensive, and in-depth explanation. Do NOT be overly concise. Break down complex topics into multi-paragraph responses using markdown formatting (bullet points, bold text, etc.) to ensure the student fully grasps the underlying mechanics.
 - diagram_update.action MUST be one of: add_nodes, add_edges, update_nodes, clear_canvas, quiz, none.
   - quiz: use this ONLY when the student explicitly asks to be tested or quizzed. Provide exactly 3 multiple-choice questions in the root "quiz" object. speech_text should introduce the quiz.
-  - add_nodes: construct rich, highly detailed architectural and conceptual flowcharts. When breaking down complex systems, use 8-15 nodes to illustrate complete lifecycles, data flows, and sub-components. Provide nodes with id, label, icon (MUST be one of: ${allowedIcons.join(",")}). DO NOT provide position. Provide edges array to connect them logically.
+  - add_nodes: construct rich, highly detailed architectural and conceptual flowcharts. When breaking down complex systems, use 8-15 nodes to illustrate complete lifecycles, data flows, and sub-components. **CRITICAL: If a node is selected, YOU MUST branch out from that selected node by adding edges that connect the selected node's ID to your new nodes.** Provide nodes with id, label, icon (MUST be one of: ${allowedIcons.join(",")}). DO NOT provide position. Provide edges array to connect them logically.
   - add_edges: add connections between nodes (provide edges with id, source, target, optional label).
   - update_nodes: highlight or update an existing node (e.g., if student is confused about selected node, set highlight:true).
   - clear_canvas: reset the canvas (provide empty nodes/edges).
   - none: no diagram change.
-- Personalize using history: do not repeat explanations already given; build upon last 6 turns.
+- For follow-up questions, ALWAYS prefer `add_nodes` to continuously expand and branch out the diagram, making it a growing, adaptive mind map. Do not keep the diagram static.
 - Icon guidance: clipboard=Planning, palette=Design, code=Code, bug=Testing, rocket=Deploy, wrench=Maintenance, database=DB, server=Backend, cloud=Cloud, lock=Security, file=Docs, user=User, layers=Architecture, cog=Process, shield=Protection, book=Concept, network=Connection, brain=AI.
 - If the user provides an image or screenshot, analyze it carefully to answer their question, translate it into the diagram canvas if requested, and directly address the visual contents in your speech_text.`;
 

@@ -1,9 +1,9 @@
 import {
   ClipboardList, Palette, Code2, Bug, Rocket, Wrench,
   Database, Server, Cloud, Lock, FileText, User, Layers,
-  Cog, Shield, BookOpen, Lightbulb, Network, Cpu, Brain,
+  Cog, Shield, BookOpen, Lightbulb, Network, Cpu, Brain, Sparkles
 } from "lucide-react";
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, NodeToolbar } from "@xyflow/react";
 
 const iconMap = {
   clipboard: ClipboardList,
@@ -58,6 +58,17 @@ export default function CustomNode({ data, selected }) {
       style={diamondStyle}
       title={isHighlighted ? "Highlighted — student confusion detected. Review this concept." : undefined}
     >
+      <NodeToolbar isVisible={selected} position={Position.Top} className="mb-2">
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('ask-node', { detail: data.label }));
+          }}
+          className="px-3 py-1.5 bg-slate-900 text-white rounded-lg shadow-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
+        >
+          <Sparkles size={12} className="text-violet-300" /> Ask about this
+        </button>
+      </NodeToolbar>
       <Handle type="target" position={Position.Top} className="!bg-slate-300 !w-2 !h-2 !border-none !-top-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
       <div className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${isHighlighted ? "bg-rose-100/80" : selected ? "bg-violet-100/80" : "bg-slate-100"}`}>
         <Icon size={16} className={isHighlighted ? "text-rose-600" : selected ? "text-violet-600" : "text-slate-600"} strokeWidth={2.5} />

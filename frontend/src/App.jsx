@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
-import ExplanationDrawer from "./components/ExplanationDrawer.jsx";
+
 import ChatSkeleton from "./components/ChatSkeleton.jsx";
 import SimpleMarkdown from "./components/SimpleMarkdown.jsx";
 import QuizCard from "./components/QuizCard.jsx";
@@ -79,8 +79,7 @@ export default function App() {
 
   const [chatHistory, setChatHistory] = useState(() => sessionRead(SESSION_CHAT, []));
   const [selectedNodeId, setSelectedNodeId] = useState(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerText, setDrawerText] = useState("");
+
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [mobileTab, setMobileTab] = useState("chat"); // "chat" | "canvas"
   const [browserVoices, setBrowserVoices] = useState([]);
@@ -142,6 +141,20 @@ export default function App() {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory]);
+
+  // ---- Custom Node Toolbar 'Ask AI' listener ----
+  useEffect(() => {
+    const handleAskNode = (e) => {
+      setQuestion(`Explain ${e.detail} in more detail.`);
+      setMobileTab("chat"); // ensure we switch to chat on mobile
+      setTimeout(() => {
+        const textarea = document.querySelector('textarea');
+        if (textarea) textarea.focus();
+      }, 50);
+    };
+    window.addEventListener('ask-node', handleAskNode);
+    return () => window.removeEventListener('ask-node', handleAskNode);
+  }, []);
 
   // ---- Voice lists + keyboard shortcut ----
   useEffect(() => {
@@ -320,9 +333,9 @@ export default function App() {
       target: e.target,
       label: e.label || "",
       type: "smoothstep",
-      animated: false,
+      animated: true,
       pathOptions: { borderRadius: 12 },
-      style: { stroke: "#6366f1", strokeWidth: 2 },
+      style: { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5, 5" },
     })),
   []);
 
@@ -343,9 +356,14 @@ export default function App() {
     switch (action) {
       case "add_nodes": {
         setNodes((prev) => {
-          const existingIds = new Set(prev.map((n) => n.id));
+          // Point 6: Remove the welcome node when real explanations populate the canvas
+          const isOnlyStart = prev.length === 1 && prev[0].id === "start";
+          const baseNodes = isOnlyStart ? [] : prev;
+          
+          const existingIds = new Set(baseNodes.map((n) => n.id));
           const toAdd = formattedNodes.filter((n) => !existingIds.has(n.id));
-          const merged = [...prev, ...toAdd];
+          const merged = [...baseNodes, ...toAdd];
+          
           setEdges((prevEdges) => {
             const edgeIds = new Set(prevEdges.map((e) => e.id));
             const newValid = formattedEdges.filter((e) => !edgeIds.has(e.id));
@@ -423,9 +441,12 @@ export default function App() {
       case "create":
       case "append": {
         setNodes((prev) => {
-          const ids = new Set(prev.map((n) => n.id));
+          const isOnlyStart = prev.length === 1 && prev[0].id === "start";
+          const baseNodes = isOnlyStart ? [] : prev;
+          
+          const ids = new Set(baseNodes.map((n) => n.id));
           const toAdd = formattedNodes.filter((n) => !ids.has(n.id));
-          const merged = [...prev, ...toAdd];
+          const merged = [...baseNodes, ...toAdd];
           setEdges((prevE) => {
             const eIds = new Set(prevE.map((e) => e.id));
             const eAdd = formattedEdges.filter((e) => !eIds.has(e.id));
@@ -610,7 +631,7 @@ export default function App() {
 
   const handleClear = () => {
     setNodes(initialNodes); setEdges(initialEdges); setChatHistory([]); setSelectedNodeId(null);
-    stopSpeech(); setLastSpeech(""); setDrawerText(""); setDrawerOpen(false);
+    stopSpeech(); setLastSpeech("");
     setExpandedIds(new Set()); lastPayloadRef.current = null;
     setSelectedImage(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1074,14 +1095,7 @@ export default function App() {
                             {isExpanded ? <>Show less <ChevronUp size={10} /></> : <>Read more <ChevronDown size={10} /></>}
                           </button>
                         )}
-                        {turn.role === "model" && !turn.quiz && (
-                          <button
-                            onClick={() => { setDrawerText(turn.text); setDrawerOpen(true); }}
-                            className="mt-2 text-[11px] font-medium text-violet-600 hover:text-violet-800 flex items-center gap-1"
-                          >
-                            <Maximize2 size={10} /> Open in drawer
-                          </button>
-                        )}
+
                       </div>
                     );
                   })}
@@ -1182,7 +1196,7 @@ export default function App() {
 
 
             {/* Last-speech mini-player */}
-            {lastSpeech && !drawerOpen && (
+            {lastSpeech && (
               <div className="rounded-xl bg-white border border-slate-200 shadow-sm p-3">
                 <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 mb-2">
                   {isTTSLoading
@@ -1206,36 +1220,10 @@ export default function App() {
                   <button onClick={isPaused ? resumeSpeech : pauseSpeech} disabled={!isSpeaking && !isPaused} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-200 text-xs disabled:opacity-40">{isPaused ? "Resume" : "Pause"}</button>
                   <button onClick={stopSpeech} disabled={!isSpeaking && !isPaused && !isTTSLoading} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-200 text-xs disabled:opacity-40">Stop</button>
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed max-h-28 overflow-y-auto pr-1 whitespace-pre-wrap break-words">
-                  {lastSpeech.slice(0, 420)}{lastSpeech.length > 420 ? "…" : ""}
-                </p>
-                <button
-                  onClick={() => setDrawerOpen(true)}
-                  className="mt-2 w-full py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium hover:bg-slate-100 flex items-center justify-center gap-1"
-                >
-                  <Maximize2 size={12} /> View full in drawer
-                </button>
               </div>
             )}
           </div>
         </div>
-
-
-      {/* Explanation drawer (floating over everything) */}
-      <ExplanationDrawer
-        open={drawerOpen}
-        speechText={drawerText || lastSpeech}
-        onClose={() => setDrawerOpen(false)}
-        onReplay={handleReplay}
-        onPause={pauseSpeech}
-        onResume={resumeSpeech}
-        onStop={stopSpeech}
-        isSpeaking={isSpeaking}
-        isPaused={isPaused}
-        isTTSLoading={isTTSLoading}
-      />
-
-      {/* ── Mobile tab switcher (floating bottom, hidden on sm+) ── */}
       <div className="sm:hidden absolute bottom-0 left-0 right-0 z-30 flex bg-white/90 backdrop-blur-md border-t border-slate-200/60 shadow-[0_-4px_24px_rgba(0,0,0,0.05)]">
         <button
           onClick={() => setMobileTab("chat")}
