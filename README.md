@@ -15,7 +15,7 @@ Dyna-learn/
 │   └── package.json (type: module)
 ├── frontend/  # Vite + React + Tailwind + @xyflow/react
 │   ├── src/App.jsx (ReactFlow canvas + hybrid TTS + lifecycle)
-│   ├── src/components/ (CustomNode, ExplanationDrawer, ChatSkeleton, QuizCard, JournalModal, SimpleMarkdown)
+│   ├── src/components/ (CustomNode, ChatSkeleton, QuizCard, JournalModal, SimpleMarkdown)
 │   ├── src/utils/ (layout.js dagre, storage.js streak/snapshots/SRS)
 │   ├── vercel.json (SPA rewrites)
 │   └── vite.config.js (tailwindcss plugin)
@@ -70,23 +70,22 @@ POST /api/tts `{text, voice}` → `audio/mpeg` MP3 (self-hosted, truncated at 50
 | `update_nodes` | `{"nodes":[{"id":"testing","highlight":true,"icon":"bug"}]}` | Rose ring highlight + dot, tooltip “Highlighted — confusion detected”, no relayout (preserves positions); logged to SRS review queue | Student confusion matched to `selectedNodeId` (see `highlight:true`). Auto-fitView to highlighted node |
 | `clear_canvas` | `{"nodes":[]}` | Resets to welcome pill `start`, toasts “Canvas cleared” | User clear or topic pivot |
 | `quiz` | root `quiz: {questions: [{question, options[4], correct_index, explanation}]}` | Renders `QuizCard` (lock-after-answer, per-question explanations); score updates SRS item | Student explicitly asks to be tested |
-| `none` | `{"nodes":[]}` | No canvas change, drawer still shows speech | Off-topic redirect |
+| `none` | `{"nodes":[]}` | No canvas change, speech still plays | Off-topic redirect |
 
 > Highlight docs: `highlight:boolean` — frontend maps via `CustomNode.jsx`. Use `icon` from broad library (`clipboard/palette/code/bug/rocket/wrench/database/server/cloud/lock/file/user/layers/cog/shield/book/lightbulb/network/cpu/brain`) — fallback heuristic `inferIcon()` covers common CS concepts. Dagre strips `position`; LLM must not guess x/y. Canvas sent to the prompt is capped at the most-recent 30 nodes.
 
 ## UX Polish
 
 - **Toasts (sonner):** `frontend/src/main.jsx` `<Toaster bottom-right>`. Success (Canvas cleared) auto-dismiss 3.5s; LLM errors sticky with `Retry` action that replays exact `payload` (no stale closure) + `Dismiss`.
-- **Loading:** Chat-only `ChatSkeleton` pulses in left panel while `loading`; canvas stays interactive (pan/zoom) with subtle corner spinner — no overlay. Drawer shows `Loading audio…` state during TTS fetch.
-- **Nodes:** `CustomNode` `rounded-2xl` presets (`rectangle/pill/diamond/circle` all sleek rounded), slate handles, rose-ring highlight / violet-ring selection.
-- **Markdown:** `SimpleMarkdown` renders `**bold**`, `` `code` ``, lists in chat bubbles and drawer (zero deps).
+- **Loading:** Chat-only `ChatSkeleton` pulses in left panel while `loading`; canvas stays interactive (pan/zoom) with subtle corner spinner — no overlay. Mini-player shows `Loading audio…` state during TTS fetch.
+- **Nodes:** `CustomNode` `rounded-2xl` presets (`rectangle/pill/diamond/circle` all sleek rounded), slate handles, rose-ring highlight / violet-ring selection. Selected nodes show an “Ask about this” toolbar that fills the question box.
+- **Markdown:** `SimpleMarkdown` renders `**bold**`, `` `code` ``, lists in chat bubbles (zero deps).
 - **Error handling:** Backend returns `{code}` (`GEMINI_RATE_LIMIT` 429, `TUTOR_RATE_LIMIT`, `TTS_RATE_LIMIT` etc.) mapped to toast descriptions.
 - **Persistence:** Canvas + chat survive reload via `sessionStorage`; lessons can be saved as snapshots (`localStorage`, max 20, images stripped) and reloaded from the Learning Journal.
 - **Journal & SRS:** Learning Journal modal tracks daily streak, saved lessons, and SM-2 spaced-repetition reviews (confused concepts auto-queued, 12h first review).
-- **Sharing:** `Share` encodes canvas + chat into URL hash (`#/s=` with size guard); opening the link restores the lesson.
+- **Sharing:** `Share` encodes canvas + chat into URL hash (`#s=` with size guard); opening the link restores the lesson.
 - **Export:** Diagram exports as SVG (bezier edges, node rects).
 - **Voice input:** Browser `SpeechRecognition` dictation into the question box.
-- **Metrics:** Node/edge pill hidden behind `Ctrl+Shift+D` (dev only).
 
 ## TTS — Unified Voices (Edge Neural + Offline, No Cold Start)
 

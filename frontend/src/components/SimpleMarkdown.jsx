@@ -1,7 +1,7 @@
 /**
  * SimpleMarkdown — lightweight inline markdown renderer (zero external deps).
  * Handles: **bold**, `code`, and \n line breaks.
- * Used for AI tutor speech_text in chat bubbles and the Explanation Drawer.
+ * Used for AI tutor speech_text in chat bubbles.
  */
 export default function SimpleMarkdown({ text, className = "" }) {
   if (!text) return null;

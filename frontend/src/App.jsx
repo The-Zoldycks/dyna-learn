@@ -144,7 +144,15 @@ export default function App() {
   // ---- Session persistence ----
   useEffect(() => { sessionWrite(SESSION_NODES, nodes); }, [nodes]);
   useEffect(() => { sessionWrite(SESSION_EDGES, edges); }, [edges]);
-  useEffect(() => { sessionWrite(SESSION_CHAT, chatHistory); }, [chatHistory]);
+  useEffect(() => {
+    // Strip image dataUrls before persisting — one 5MB upload would blow the sessionStorage quota
+    const lean = chatHistory.map((turn) => {
+      if (!turn.image) return turn;
+      const { image, ...rest } = turn;
+      return rest;
+    });
+    sessionWrite(SESSION_CHAT, lean);
+  }, [chatHistory]);
 
   // ---- Auto-scroll chat to latest message ----
   useEffect(() => {
@@ -284,7 +292,7 @@ export default function App() {
   // ---- Unified speak ----
   const speakText = useCallback(async (text) => {
     if (!text) return;
-    setLastSpeech(text); setDrawerText(text);
+    setLastSpeech(text);
     if (isEdgeVoice(selectedVoice)) {
       const ok = await speakEdge(text);
       if (ok) return;
@@ -923,7 +931,7 @@ export default function App() {
 
   // ---- JSX ----
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#fafafa] text-slate-900 font-sans antialiased">
+    <div className="relative h-screen w-screen overflow-hidden bg-[#fafafa] text-slate-900 font-sans antialiased supports-[height:100dvh]:h-[100dvh]">
 
       {/* ── Accessibility: Screen reader live region (Rule 20) ── */}
       <div
