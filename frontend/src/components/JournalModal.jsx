@@ -28,23 +28,26 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
   if (!open) return null;
 
   return (
-    <div 
+    <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
       onClick={onClose}
     >
-      <div 
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Learning journal"
         className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        
+
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50/50">
           <div className="flex items-center gap-2 text-slate-800 font-semibold">
-            <BookOpen size={18} className="text-violet-600" />
+            <BookOpen size={18} className="text-violet-600" aria-hidden="true" />
             Learning Journal
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-slate-200 text-slate-500 transition">
-            <X size={18} />
+          <button onClick={onClose} aria-label="Close learning journal" className="p-1.5 rounded-full hover:bg-slate-200 text-slate-500 transition">
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
 
@@ -126,9 +129,10 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
                       ) : (
                         <button
                           onClick={() => setConfirmDeleteId(snap.id)}
-                          className="text-slate-400 hover:text-red-600 transition md:opacity-0 md:group-hover:opacity-100"
+                          aria-label={`Delete saved lesson ${snap.title}`}
+                          className="text-slate-400 hover:text-red-600 transition focus:opacity-100 md:opacity-0 md:group-hover:opacity-100"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={14} aria-hidden="true" />
                         </button>
                       )}
                     </div>

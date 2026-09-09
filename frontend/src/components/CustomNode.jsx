@@ -74,7 +74,7 @@ export default function CustomNode({ data, selected }) {
         <Icon size={16} className={isHighlighted ? "text-rose-600" : selected ? "text-violet-600" : "text-slate-600"} strokeWidth={2.5} />
       </div>
       <span className="flex-1 leading-snug text-[13px] tracking-tight whitespace-pre-wrap break-words">{data.label}</span>
-      {isHighlighted && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white" aria-label="Highlighted" />}
+      {isHighlighted && <span role="status" aria-label="Highlighted for review" className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white" />}
       <Handle type="source" position={Position.Bottom} className="!bg-slate-300 !w-2 !h-2 !border-none !-bottom-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
     </div>
   );

@@ -1,9 +1,8 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect, lazy, Suspense } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -12,7 +11,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
-  Pause, Play, Square, ChevronDown, ChevronUp, Maximize2, X, Mic,
+  ChevronUp, Mic,
   MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,7 +20,7 @@ import CustomNode from "./components/CustomNode.jsx";
 import ChatSkeleton from "./components/ChatSkeleton.jsx";
 import SimpleMarkdown from "./components/SimpleMarkdown.jsx";
 import QuizCard from "./components/QuizCard.jsx";
-import JournalModal from "./components/JournalModal.jsx";
+const JournalModal = lazy(() => import("./components/JournalModal.jsx"));
 import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
 
@@ -141,22 +140,32 @@ export default function App() {
   const onNodeClick = useCallback((_, node) => setSelectedNodeId(node.id), []);
   const onPaneClick = useCallback(() => setSelectedNodeId(null), []);
 
-  // ---- Session persistence ----
-  useEffect(() => { sessionWrite(SESSION_NODES, nodes); }, [nodes]);
-  useEffect(() => { sessionWrite(SESSION_EDGES, edges); }, [edges]);
+  // ---- Session persistence (debounced — avoids a write per drag tick) ----
   useEffect(() => {
-    // Strip image dataUrls before persisting — one 5MB upload would blow the sessionStorage quota
-    const lean = chatHistory.map((turn) => {
-      if (!turn.image) return turn;
-      const { image, ...rest } = turn;
-      return rest;
-    });
-    sessionWrite(SESSION_CHAT, lean);
+    const t = setTimeout(() => sessionWrite(SESSION_NODES, nodes), 300);
+    return () => clearTimeout(t);
+  }, [nodes]);
+  useEffect(() => {
+    const t = setTimeout(() => sessionWrite(SESSION_EDGES, edges), 300);
+    return () => clearTimeout(t);
+  }, [edges]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      // Strip image dataUrls before persisting — one 5MB upload would blow the sessionStorage quota
+      const lean = chatHistory.map((turn) => {
+        if (!turn.image) return turn;
+        const { image, ...rest } = turn;
+        return rest;
+      });
+      sessionWrite(SESSION_CHAT, lean);
+    }, 300);
+    return () => clearTimeout(t);
   }, [chatHistory]);
 
-  // ---- Auto-scroll chat to latest message ----
+  // ---- Auto-scroll chat to latest message (instantly if reduced motion) ----
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    chatBottomRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
   }, [chatHistory]);
 
   // ---- Custom Node Toolbar 'Ask AI' listener ----
@@ -1073,7 +1082,9 @@ export default function App() {
                 <Mic size={12} className="text-violet-600" /> Voice
                 <span className="ml-auto text-[10px] text-slate-500">{edgeVoices.length + browserVoices.length} voices</span>
               </div>
+              <label htmlFor="voice-select" className="sr-only">Choose a narration voice</label>
               <select
+                id="voice-select"
                 value={selectedVoice}
                 onChange={(e) => setSelectedVoice(e.target.value)}
                 className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500"
@@ -1212,7 +1223,7 @@ export default function App() {
                 disabled={loading || isOffline}
                 aria-disabled={loading || isOffline}
                 aria-label="Ask the tutor a question"
-                aria-describedby="submit-hint"
+                aria-describedby={loading ? "submit-hint-loading" : isOffline ? "submit-hint-offline" : undefined}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 focus:bg-white transition resize-none disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-slate-100"
               />
               <div className="flex gap-2">
@@ -1264,12 +1275,12 @@ export default function App() {
                 </button>
               </div>
               {loading && (
-                <p id="submit-hint" className="text-xs text-center text-violet-600">
+                <p id="submit-hint-loading" className="text-xs text-center text-violet-600">
                   Tutor is thinking — canvas will update when done
                 </p>
               )}
               {isOffline && !loading && (
-                <p id="submit-hint" className="text-xs text-center text-amber-600 font-medium">
+                <p id="submit-hint-offline" className="text-xs text-center text-amber-600 font-medium">
                   ⚠ You're offline — reconnect to send a message
                 </p>
               )}
@@ -1332,12 +1343,16 @@ export default function App() {
         </button>
       </div>
 
-      <JournalModal
-        open={journalOpen}
-        onClose={() => setJournalOpen(false)}
-        onLoadSnapshot={handleLoadSnapshot}
-        onStartReview={handleStartReview}
-      />
+      {journalOpen && (
+        <Suspense fallback={null}>
+          <JournalModal
+            open={journalOpen}
+            onClose={() => setJournalOpen(false)}
+            onLoadSnapshot={handleLoadSnapshot}
+            onStartReview={handleStartReview}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
