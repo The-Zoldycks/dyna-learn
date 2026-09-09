@@ -45,8 +45,16 @@ const SESSION_CHAT  = "dyna-chat";
 function sessionRead(key, fallback) {
   try {
     const raw = sessionStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    // Basic shape validation — silently recover from corrupt payloads
+    if (key === SESSION_NODES && !Array.isArray(parsed)) return fallback;
+    if (key === SESSION_EDGES && !Array.isArray(parsed)) return fallback;
+    if (key === SESSION_CHAT  && !Array.isArray(parsed)) return fallback;
+    return parsed;
   } catch {
+    // Corrupted JSON or storage quota exceeded — nuke the key and recover
+    try { sessionStorage.removeItem(key); } catch {}
     return fallback;
   }
 }
@@ -91,6 +99,7 @@ export default function App() {
   const [journalOpen, setJournalOpen] = useState(false);
   const [activeReviewId, setActiveReviewId] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   const recognitionRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -154,6 +163,29 @@ export default function App() {
     };
     window.addEventListener('ask-node', handleAskNode);
     return () => window.removeEventListener('ask-node', handleAskNode);
+  }, []);
+
+  // ---- Connectivity detection (Rule 13 — Connectivity States) ----
+  useEffect(() => {
+    const goOffline = () => {
+      setIsOffline(true);
+      toast.warning("You're offline", {
+        description: "Check your connection. The tutor won't respond until you reconnect.",
+        duration: Infinity,
+        id: "offline-toast",
+      });
+    };
+    const goOnline = () => {
+      setIsOffline(false);
+      toast.dismiss("offline-toast");
+      toast.success("Back online!", { description: "You're reconnected. Good to go.", duration: 3000 });
+    };
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("online", goOnline);
+    return () => {
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online", goOnline);
+    };
   }, []);
 
   // ---- Voice lists + keyboard shortcut ----
@@ -554,7 +586,6 @@ export default function App() {
       if (speech_text || quiz) {
         if (speech_text) {
           speakText(speech_text);
-          setDrawerText(speech_text); setDrawerOpen(true);
         }
         setChatHistory((prev) => {
           const next = [
@@ -604,6 +635,10 @@ export default function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!question.trim() && !selectedImage || loading) return;
+    if (isOffline) {
+      toast.error("You're offline", { description: "Reconnect to the internet before asking the tutor." });
+      return;
+    }
     const canvasState = { nodes, edges };
     
     // Strip image dataUrl from previous turns to save tokens and payload size
@@ -889,6 +924,30 @@ export default function App() {
   // ---- JSX ----
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#fafafa] text-slate-900 font-sans antialiased">
+
+      {/* ── Accessibility: Screen reader live region (Rule 20) ── */}
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {loading ? "Tutor is thinking, please wait." : ""}
+        {chatHistory.length > 0 && !loading
+          ? `Tutor replied: ${chatHistory[chatHistory.length - 1]?.text?.slice(0, 120) ?? ""}`
+          : ""}
+      </div>
+
+      {/* ── Connectivity: Offline banner (Rule 13) ── */}
+      {isOffline && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="absolute top-0 left-0 right-0 z-[100] flex items-center justify-center gap-2 bg-amber-500 text-white text-xs font-semibold py-2 px-4 shadow-md"
+        >
+          <span className="w-2 h-2 rounded-full bg-white animate-pulse shrink-0" />
+          You're offline — the tutor won't respond until your connection is restored.
+        </div>
+      )}
       
       {/* ── Background Canvas (z-0) ── */}
       <div className={`absolute inset-0 z-0 transition-opacity ${mobileTab === "chat" ? "opacity-0 pointer-events-none sm:opacity-100 sm:pointer-events-auto" : "opacity-100"}`}>
@@ -1142,8 +1201,10 @@ export default function App() {
                     : "e.g. Explain database normalization… (Ctrl+Enter to send)"
                 }
                 rows={3}
-                disabled={loading}
-                aria-disabled={loading}
+                disabled={loading || isOffline}
+                aria-disabled={loading || isOffline}
+                aria-label="Ask the tutor a question"
+                aria-describedby="submit-hint"
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 focus:bg-white transition resize-none disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-slate-100"
               />
               <div className="flex gap-2">
@@ -1152,16 +1213,18 @@ export default function App() {
                   accept="image/*"
                   ref={fileInputRef}
                   onChange={handleImageChange}
+                  aria-label="Upload an image to analyze"
                   className="hidden"
                 />
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={loading}
-                  title="Upload image"
+                  aria-label="Upload image"
+                  title="Upload image (max 5MB)"
                   className="flex-none flex items-center justify-center w-12 rounded-xl border bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Image size={18} />
+                  <Image size={18} aria-hidden="true" />
                 </button>
                 {(window.SpeechRecognition || window.webkitSpeechRecognition) && (
                   <button
@@ -1170,6 +1233,7 @@ export default function App() {
                     onPointerUp={handleVoiceStop}
                     onPointerLeave={handleVoiceStop}
                     disabled={loading}
+                    aria-label={isListening ? "Listening… release to stop" : "Hold to speak"}
                     title="Hold to speak"
                     className={`flex-none flex items-center justify-center w-12 rounded-xl border transition ${
                       isListening
@@ -1182,17 +1246,23 @@ export default function App() {
                 )}
                 <button
                   type="submit"
-                  disabled={loading || (!question.trim() && !selectedImage)}
+                  disabled={loading || isOffline || (!question.trim() && !selectedImage)}
+                  aria-label={loading ? "Tutor is thinking" : "Send your question to the tutor"}
                   className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white font-medium text-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md"
                 >
                   {loading
-                    ? <><Loader2 size={16} className="animate-spin" /> Thinking…</>
-                    : <><Send size={16} /> Ask Tutor</>}
+                    ? <><Loader2 size={16} className="animate-spin" aria-hidden="true" /> Thinking…</>
+                    : <><Send size={16} aria-hidden="true" /> Ask Tutor</>}
                 </button>
               </div>
               {loading && (
-                <p className="text-xs text-center text-violet-600">
-                  Input locked while thinking — prevents duplicate canvas updates
+                <p id="submit-hint" className="text-xs text-center text-violet-600">
+                  Tutor is thinking — canvas will update when done
+                </p>
+              )}
+              {isOffline && !loading && (
+                <p id="submit-hint" className="text-xs text-center text-amber-600 font-medium">
+                  ⚠ You're offline — reconnect to send a message
                 </p>
               )}
             </form>
