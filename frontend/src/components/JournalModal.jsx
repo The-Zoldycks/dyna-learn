@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
-import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight } from "lucide-react";
+import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight, BarChart3 } from "lucide-react";
 import { getStreak, getSnapshots, getDueReviews, deleteSnapshot } from "../utils/storage";
+import { getStats } from "../utils/analytics";
 
 export default function JournalModal({ open, onClose, onLoadSnapshot, onStartReview }) {
   const [streak, setStreak] = useState(0);
   const [snapshots, setSnapshots] = useState([]);
   const [dueReviews, setDueReviews] = useState([]);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [stats, setStats] = useState(null);
 
   useEffect(() => {
     if (open) {
@@ -14,6 +16,7 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
       setSnapshots(getSnapshots());
       setDueReviews(getDueReviews());
       setConfirmDeleteId(null);
+      setStats(getStats());
     }
   }, [open]);
 
@@ -76,6 +79,29 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
               </div>
             </div>
           </div>
+
+          {/* Learning activity (on-device analytics) */}
+          {stats && stats.total > 0 && (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                <BarChart3 size={12} /> Learning activity
+              </p>
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-center">
+                {[
+                  ["Questions", stats.questions],
+                  ["Quizzes", stats.quizzes],
+                  ["Passed", stats.quizzesPassed],
+                  ["Shares", stats.shares],
+                  ["Exports", stats.exports],
+                ].map(([label, value]) => (
+                  <div key={label} className="bg-white border border-slate-200 rounded-lg py-2">
+                    <p className="text-lg font-bold text-slate-800">{value}</p>
+                    <p className="text-[10px] text-slate-500">{label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* SRS Due Reviews */}
           {dueReviews.length > 0 && (

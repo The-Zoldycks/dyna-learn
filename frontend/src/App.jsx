@@ -23,6 +23,7 @@ import QuizCard from "./components/QuizCard.jsx";
 const JournalModal = lazy(() => import("./components/JournalModal.jsx"));
 import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
+import { track } from "./utils/analytics.js";
 
 const nodeTypes = { custom: CustomNode };
 
@@ -36,34 +37,50 @@ const INITIAL_NODE = {
 const initialNodes = [INITIAL_NODE];
 const initialEdges = [];
 
-// ---------- session-storage helpers ----------
+// ---------- cross-session persistence helpers (localStorage, quota-safe) ----------
+// Migrates legacy sessionStorage keys forward so returning users keep their lesson.
 const SESSION_NODES = "dyna-nodes";
 const SESSION_EDGES = "dyna-edges";
 const SESSION_CHAT  = "dyna-chat";
 
 function sessionRead(key, fallback) {
   try {
-    const raw = sessionStorage.getItem(key);
+    const raw = localStorage.getItem(key) ?? sessionStorage.getItem(key);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     // Basic shape validation — silently recover from corrupt payloads
-    if (key === SESSION_NODES && !Array.isArray(parsed)) return fallback;
-    if (key === SESSION_EDGES && !Array.isArray(parsed)) return fallback;
-    if (key === SESSION_CHAT  && !Array.isArray(parsed)) return fallback;
+    if (!Array.isArray(parsed)) return fallback;
     return parsed;
   } catch {
-    // Corrupted JSON or storage quota exceeded — nuke the key and recover
-    try { sessionStorage.removeItem(key); } catch {}
+    // Corrupted JSON — nuke the key and recover
+    try { localStorage.removeItem(key); sessionStorage.removeItem(key); } catch {}
     return fallback;
   }
 }
 
 function sessionWrite(key, value) {
-  try { sessionStorage.setItem(key, JSON.stringify(value)); } catch {}
+  const write = (store) => store.setItem(key, JSON.stringify(value));
+  try {
+    write(localStorage);
+  } catch {
+    // Quota exceeded — retry with a trimmed payload, then give up silently
+    try {
+      const trimmed = Array.isArray(value) ? value.slice(-6) : value;
+      localStorage.setItem(key, JSON.stringify(trimmed));
+    } catch {
+      try {
+        const minimal = Array.isArray(value) ? value.slice(-2) : value;
+        localStorage.setItem(key, JSON.stringify(minimal));
+      } catch {}
+    }
+  }
 }
 
 function sessionClear() {
   try {
+    localStorage.removeItem(SESSION_NODES);
+    localStorage.removeItem(SESSION_EDGES);
+    localStorage.removeItem(SESSION_CHAT);
     sessionStorage.removeItem(SESSION_NODES);
     sessionStorage.removeItem(SESSION_EDGES);
     sessionStorage.removeItem(SESSION_CHAT);
@@ -620,6 +637,7 @@ export default function App() {
         applyDiagramUpdateStable(diagram_update);
       }
       if (retryLabel) toast.dismiss();
+      track("question_asked", { hasImage: !!payload.image, nodeSelected: !!payload.selectedNodeId });
       return true;
     } catch (err) {
       console.error(err);
@@ -693,16 +711,47 @@ export default function App() {
 
   const handleReplay = () => { if (lastSpeech) speakText(lastSpeech); };
 
-  const handleExportSVG = useCallback(async () => {
+  // Rasterize an SVG string to a PNG blob (2x for crisp text). SVG uses only
+  // system fonts — no external refs, so the canvas is never tainted.
+  const svgToPngBlob = (svg, W, H, scale = 2) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(W * scale);
+        canvas.height = Math.round(H * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0, W, H);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("PNG encode failed"))),
+          "image/png"
+        );
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("SVG raster failed"));
+    };
+    img.src = url;
+  });
+
+  const renderDiagramPng = useCallback(async () => {
     const instance = reactFlowInstanceRef.current;
-    if (!instance) return;
+    if (!instance) return null;
+    const svg = buildDiagramSVG(instance.getNodes(), instance.getEdges());
+    if (!svg) return null;
+    return svgToPngBlob(svg.text, svg.W, svg.H);
+  }, []);
 
-    const exportNodes = instance.getNodes();
-    const exportEdges = instance.getEdges();
-    if (exportNodes.length === 0) return;
-
-    try {
-      toast.loading("Generating SVG…", { id: "export" });
+  // Pure SVG builder shared by PNG export + image share (null when empty)
+  const buildDiagramSVG = (exportNodes, exportEdges) => {
+    if (!exportNodes.length) return null;
 
       // ── Compute bounding box ──────────────────────────────────────────────
       const PAD = 48;
@@ -796,19 +845,31 @@ export default function App() {
   <text x="${W - 12}" y="${H - 10}" text-anchor="end" font-size="10" fill="#94a3b8" font-family="system-ui,sans-serif">Dyna-learn · ${new Date().toLocaleDateString()}</text>
 </svg>`;
 
-      // ── Trigger download ──────────────────────────────────────────────────
-      const blob   = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-      const url    = URL.createObjectURL(blob);
+    return { text: svg, W, H };
+  };
+
+  const handleExportPNG = useCallback(async () => {
+    const instance = reactFlowInstanceRef.current;
+    if (!instance) return;
+    try {
+      toast.loading("Generating PNG…", { id: "export" });
+      const built = buildDiagramSVG(instance.getNodes(), instance.getEdges());
+      if (!built) return;
+      const blob = await svgToPngBlob(built.text, built.W, built.H);
+      const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
-      anchor.download = `dyna-learn-${Date.now()}.svg`;
+      anchor.download = `dyna-learn-${Date.now()}.png`;
       anchor.href = url;
       anchor.click();
       URL.revokeObjectURL(url);
-
-      toast.success("Diagram exported as SVG!", { id: "export", duration: 2500 });
+      track("diagram_exported", { format: "png" });
+      toast.success("Diagram exported as PNG!", { id: "export", duration: 2500 });
     } catch (err) {
       console.error("Export failed:", err);
+      toast.dismiss("export");
+      toast.error("Export failed — try again.");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---- Voice Input -----------------------------------------------------
@@ -868,7 +929,7 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
 
-  const handleShare = useCallback(() => {
+  const handleShare = useCallback(async () => {
     if (nodes.length <= 1) return;
     try {
       const payload = {
@@ -878,19 +939,35 @@ export default function App() {
       // Minimal zero-dependency base64 string for URL hash
       const jsonStr = JSON.stringify(payload);
       const b64 = window.btoa(unescape(encodeURIComponent(jsonStr)));
-      
+
       const url = `${window.location.origin}${window.location.pathname}#s=${b64}`;
       if (url.length > 4000) {
         throw new Error("Canvas is too large to share via URL link. Try taking a snapshot instead.");
       }
-      
-      navigator.clipboard.writeText(url).then(() => {
-        toast.success("Share link copied to clipboard!", { description: "Anyone with this link can continue the lesson." });
-      });
+
+      // Prefer native share with a PNG snapshot where supported
+      try {
+        const blob = await renderDiagramPng();
+        const file = blob ? new File([blob], `dyna-learn-${Date.now()}.png`, { type: "image/png" }) : null;
+        if (file && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], title: "Dyna-learn lesson", text: url });
+          track("lesson_shared", { method: "file" });
+          toast.success("Lesson shared!");
+          return;
+        }
+      } catch (shareErr) {
+        // User dismissed the sheet or file share failed — fall through to link
+        if (shareErr?.name === "AbortError") return;
+      }
+
+      await navigator.clipboard.writeText(url);
+      track("lesson_shared", { method: "link" });
+      toast.success("Share link copied to clipboard!", { description: "Anyone with this link can continue the lesson." });
     } catch (err) {
       console.error("Share failed", err);
-      toast.error("Failed to generate share link");
+      toast.error(err.message || "Failed to generate share link");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, edges]);
 
   // ---- Retention Engine Handlers -----------------------------------------
@@ -899,6 +976,7 @@ export default function App() {
     if (!title) return;
     try {
       saveSnapshot(title, nodes, edges, chatHistory);
+      track("snapshot_saved");
       toast.success(`Lesson "${title}" saved to Journal!`);
     } catch (err) {
       toast.error(err.message);
@@ -923,6 +1001,7 @@ export default function App() {
   }, [executeTutor, nodes, edges]);
 
   const handleQuizComplete = useCallback((passed, turnIdx) => {
+    track("quiz_completed", { passed: !!passed });
     if (activeReviewId) {
       updateSRSItem(activeReviewId, passed);
       setActiveReviewId(null);
@@ -995,9 +1074,9 @@ export default function App() {
               <Network size={14} className="text-violet-600" /> Share
             </button>
             <button
-              onClick={handleExportSVG}
+              onClick={handleExportPNG}
               disabled={nodes.length <= 1}
-              title="Download diagram as SVG"
+              title="Download diagram as PNG"
               className="flex items-center gap-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-full px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Download size={14} className="text-violet-600" /> Export
