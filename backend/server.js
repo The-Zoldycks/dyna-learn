@@ -59,6 +59,9 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
+// Behind Render's proxy — without this, express-rate-limit counts the proxy IP as one user
+app.set('trust proxy', 1);
+
 // Per-IP rate limiting — second layer behind CORS so a hotlinked key can't burn Gemini quota
 const tutorLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -99,12 +102,18 @@ app.post("/api/tutor", async (req, res) => {
       image = null,
     } = req.body;
 
-    if (!studentQuestion) {
-      return res.status(400).json({ error: "studentQuestion is required" });
+    if (!studentQuestion || typeof studentQuestion !== "string") {
+      return res.status(400).json({ error: "studentQuestion is required", code: "VALIDATION_ERROR" });
     }
-
     // Support both legacy flowchartState and new canvasState (monorepo contract)
-    const effectiveCanvas = canvasState || flowchartState || { nodes: [], edges: [] };
+    const rawCanvas = canvasState || flowchartState || { nodes: [], edges: [] };
+    // Input caps — bound context size and per-request cost before touching the model
+    const cappedQuestion = studentQuestion.slice(0, 4000);
+    const cappedHistory = (Array.isArray(chatHistory) ? chatHistory : []).slice(-20);
+    const effectiveCanvas = {
+      nodes: (rawCanvas.nodes || []).slice(0, 200),
+      edges: (rawCanvas.edges || []).slice(0, 500),
+    };
 
     // Cap canvas to the most-recent 30 nodes before injecting into the system prompt.
     // Large canvases (100+ nodes) can exhaust context tokens silently; pruning keeps
@@ -121,9 +130,9 @@ app.post("/api/tutor", async (req, res) => {
 
     // Sliding window: retain last 6 conversation turns (3 user prompts + 3 AI responses)
     // chatHistory expected as array of {role: "user"|"model", text: string} or {role, content}
-    const normalizedHistory = (Array.isArray(chatHistory) ? chatHistory : []).map((entry) => ({
+    const normalizedHistory = cappedHistory.map((entry) => ({
       role: entry.role === "model" || entry.role === "assistant" ? "model" : "user",
-      text: entry.text || entry.content || entry.message || "",
+      text: String(entry.text || entry.content || entry.message || "").slice(0, 2000),
     })).filter((e) => e.text && e.text.trim().length > 0);
 
     const windowedHistory = normalizedHistory.slice(-6);
@@ -304,13 +313,20 @@ Rules:
 
     // Append current student question with selected node context
     const currentPromptText = selectedNodeContext
-      ? `Student clicked node "${selectedNodeContext.id}" (${selectedNodeContext.label}) and asks: ${studentQuestion}`
-      : `Student question: ${studentQuestion}`;
+      ? `Student clicked node "${selectedNodeContext.id}" (${selectedNodeContext.label}) and asks: ${cappedQuestion}`
+      : `Student question: ${cappedQuestion}`;
 
     const currentParts = [{ text: currentPromptText }];
-    
-    // Inject Multimodal image if provided
+
+    // Inject Multimodal image if provided — allowlist mime types, cap base64 size
+    const IMAGE_ALLOWLIST = ["image/png", "image/jpeg", "image/webp"];
     if (image && image.base64 && image.mimeType) {
+      if (!IMAGE_ALLOWLIST.includes(image.mimeType)) {
+        return res.status(400).json({ error: "Unsupported image type (png/jpeg/webp only)", code: "VALIDATION_ERROR" });
+      }
+      if (image.base64.length > 2 * 1024 * 1024) {
+        return res.status(400).json({ error: "Image too large (2MB base64 max)", code: "VALIDATION_ERROR" });
+      }
       currentParts.push({
         inlineData: {
           data: image.base64,
@@ -388,16 +404,26 @@ Rules:
 const EDGE_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const EDGE_VOICE_LIST_URL = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=${EDGE_TOKEN}`;
 
+// In-memory voices cache (1h TTL) — avoids hitting Bing on every page load
+let voicesCache = { at: 0, voices: null };
+const VOICES_TTL_MS = 60 * 60 * 1000;
+
 app.get("/api/tts/voices", async (req, res) => {
   try {
-    const resp = await fetch(EDGE_VOICE_LIST_URL);
+    if (voicesCache.voices && Date.now() - voicesCache.at < VOICES_TTL_MS) {
+      return res.json({ voices: voicesCache.voices, mode: "edge", count: voicesCache.voices.length, cached: true });
+    }
+    const resp = await fetch(EDGE_VOICE_LIST_URL, { signal: AbortSignal.timeout(8000) });
     if (!resp.ok) throw new Error(`voices ${resp.status}`);
     const voices = await resp.json();
     const filtered = voices
       .filter((v) => v.Locale.startsWith("en-") || v.Locale.startsWith("zh-") || v.Locale.startsWith("ja-") || v.Locale.startsWith("ko-"))
       .slice(0, 30)
       .map((v) => ({ id: v.ShortName, label: `${String(v.FriendlyName).replace("Microsoft ", "")} — ${v.Gender} (${v.Locale})`, lang: v.Locale, gender: v.Gender, locale: v.Locale }));
-    if (filtered.length) return res.json({ voices: filtered, mode: "edge", count: filtered.length });
+    if (filtered.length) {
+      voicesCache = { at: Date.now(), voices: filtered };
+      return res.json({ voices: filtered, mode: "edge", count: filtered.length });
+    }
     throw new Error("empty");
   } catch (e) {
     console.warn("[tts] getVoices failed, using fallback:", e.message);
