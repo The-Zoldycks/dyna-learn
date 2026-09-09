@@ -26,6 +26,8 @@ const FALLBACK_MODELS = [
   "gemini-flash-lite-latest",
   "gemini-3.1-flash-lite-preview",
 ];
+// Last known-good model — tried first to skip the fallback chain on warm paths
+let workingModel = null;
 
 // TTS — self-hosted edge-tts (Toolbox parity, no external fetch, no cold start)
 const EDGE_VOICE_FALLBACK = [
@@ -120,9 +122,10 @@ app.post("/api/tutor", async (req, res) => {
     // the model focused and within safe limits. The full canvas is still used for
     // selectedNodeId resolution below.
     const CANVAS_NODE_LIMIT = 30;
+    const CANVAS_EDGE_LIMIT = 100;
     const canvasForPrompt = {
       nodes: (effectiveCanvas.nodes || []).slice(-CANVAS_NODE_LIMIT),
-      edges: effectiveCanvas.edges || [],
+      edges: (effectiveCanvas.edges || []).slice(-CANVAS_EDGE_LIMIT),
     };
     if ((effectiveCanvas.nodes || []).length > CANVAS_NODE_LIMIT) {
       console.warn(`[tutor] canvas truncated ${effectiveCanvas.nodes.length} → ${CANVAS_NODE_LIMIT} nodes for prompt`);
@@ -268,10 +271,6 @@ app.post("/api/tutor", async (req, res) => {
       required: ["speech_text", "diagram_update"],
     };
 
-    const historyText = windowedHistory.length
-      ? windowedHistory.map((h) => `${h.role === "model" ? "AI Tutor" : "Student"}: ${h.text}`).join("\n")
-      : "No prior conversation.";
-
     const selectedNodeText = selectedNodeContext
       ? `Selected node -> id: "${selectedNodeContext.id}", label: "${selectedNodeContext.label}", type: "${selectedNodeContext.type}"`
       : "No node selected.";
@@ -282,8 +281,7 @@ app.post("/api/tutor", async (req, res) => {
 Context you MUST use:
 - CanvasState (ReactFlow current nodes/edges — positions are auto-calculated, ignore x/y): ${JSON.stringify(canvasForPrompt)}
 - ${selectedNodeText}
-- ChatHistory (sliding window last 6 turns, 3 user + 3 AI): 
-${historyText}
+- ChatHistory: the last ${windowedHistory.length} conversation turns are provided as native conversation history alongside this instruction — use them for personalization instead of repeating explanations.
 
 Rules:
 - Always respond with valid JSON matching the required schema.
@@ -340,10 +338,14 @@ Rules:
       parts: currentParts,
     });
 
-    // Try primary model, fallback on 404 (new-user restriction on 2.5)
+    // Try cached working model first, then primary + fallbacks on 404 (new-user restriction on 2.5)
+    // 30s abort per attempt so a hung model never blocks the event loop indefinitely
     let response;
     let lastError;
-    const candidates = [GEMINI_MODEL, ...FALLBACK_MODELS.filter((m) => m !== GEMINI_MODEL)];
+    const ordered = workingModel && workingModel !== GEMINI_MODEL
+      ? [workingModel, GEMINI_MODEL, ...FALLBACK_MODELS.filter((m) => m !== GEMINI_MODEL && m !== workingModel)]
+      : [GEMINI_MODEL, ...FALLBACK_MODELS.filter((m) => m !== GEMINI_MODEL)];
+    const candidates = [...new Set(ordered)];
     for (const model of candidates) {
       try {
         console.log(`[tutor] attempting model: ${model} | selectedNode: ${selectedNodeId || "none"} | history: ${windowedHistory.length}`);
@@ -354,14 +356,17 @@ Rules:
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema,
+            httpOptions: { timeout: 30000 },
           },
         });
         console.log(`[tutor] success with model: ${model}`);
+        workingModel = model;
         break;
       } catch (err) {
         lastError = err;
         const msg = err?.message || "";
-        const is404 = msg.includes("404") || msg.includes("NOT_FOUND") || msg.includes("no longer available");
+        const status = err?.status ?? err?.code ?? err?.response?.status;
+        const is404 = status === 404 || msg.includes("404") || msg.includes("NOT_FOUND") || msg.includes("no longer available") || msg.includes("MODEL_NOT_FOUND");
         console.warn(`[tutor] model ${model} failed: ${msg.slice(0, 200)}`);
         if (!is404) throw err;
         // otherwise continue to next fallback
