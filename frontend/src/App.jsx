@@ -12,7 +12,7 @@ import "@xyflow/react/dist/style.css";
 import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
-  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain,
+  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -21,9 +21,10 @@ import ChatSkeleton from "./components/ChatSkeleton.jsx";
 import SimpleMarkdown from "./components/SimpleMarkdown.jsx";
 import QuizCard from "./components/QuizCard.jsx";
 const JournalModal = lazy(() => import("./components/JournalModal.jsx"));
+const TopicExplorerModal = lazy(() => import("./components/TopicExplorerModal.jsx"));
 import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
-import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash } from "./utils/export.js";
+import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
 import { track } from "./utils/analytics.js";
 
 const nodeTypes = { custom: CustomNode };
@@ -114,6 +115,7 @@ export default function App() {
   );
   const [isListening, setIsListening] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [topicExplorerOpen, setTopicExplorerOpen] = useState(false);
   const [activeReviewId, setActiveReviewId] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
@@ -789,6 +791,30 @@ export default function App() {
     }
   }, []);
 
+  const handleExportAnki = useCallback(() => {
+    try {
+      const csv = buildAnkiCSV(nodes, edges);
+      if (!csv) {
+        toast.info("Add some concept nodes to export Anki flashcards.");
+        return;
+      }
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.download = `dyna-learn-anki-${Date.now()}.csv`;
+      anchor.href = url;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      track("diagram_exported", { format: "anki_csv" });
+      toast.success("Anki flashcards CSV exported!", {
+        description: "Ready to import into Anki (Basic front/back cards).",
+      });
+    } catch (err) {
+      console.error("Anki export failed:", err);
+      toast.error("Failed to generate Anki CSV.");
+    }
+  }, [nodes, edges]);
+
   // ---- Voice Input (tap-to-toggle with auto-append) ---------------------
   const toggleVoice = useCallback((e) => {
     e.preventDefault();
@@ -972,6 +998,21 @@ export default function App() {
     }
   }, [activeReviewId]);
 
+  const handleSelectTopic = useCallback((topic) => {
+    setTopicExplorerOpen(false);
+    const layouted = getLayoutedElements(topic.nodes, topic.edges);
+    setNodes(layouted.nodes);
+    setEdges(layouted.edges);
+    setChatHistory([]);
+    setSelectedNodeId(null);
+    setQuestion(topic.prompt);
+    toast.success(`Loaded "${topic.title}"`, { description: "Tutor is starting the lesson..." });
+    setTimeout(() => {
+      triggerFitView();
+      executeTutor({ studentQuestion: topic.prompt, nodes: layouted.nodes, edges: layouted.edges });
+    }, 250);
+  }, [setNodes, setEdges, triggerFitView, executeTutor]);
+
   // ---- Derived state ----
   const selectedNodeLabel = useMemo(
     () => selectedNodeId ? nodes.find((n) => n.id === selectedNodeId)?.data?.label || selectedNodeId : null,
@@ -1057,6 +1098,16 @@ export default function App() {
               >
                 SVG
               </button>
+              <div className="w-px h-3.5 bg-slate-200" />
+              <button
+                onClick={handleExportAnki}
+                disabled={nodes.length <= 1}
+                title="Export concepts as Anki flashcards (.csv)"
+                aria-label="Export as Anki flashcards"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full"
+              >
+                Anki
+              </button>
             </div>
           </Panel>
 
@@ -1080,6 +1131,13 @@ export default function App() {
 
       {/* ── Floating Top Actions (Top Right) ── */}
       <header className="absolute top-4 right-4 sm:top-5 sm:right-5 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-xl px-2 py-2 rounded-2xl shadow-sm border border-slate-200/60">
+        <button
+          onClick={() => setTopicExplorerOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
+        >
+          <Compass size={14} className="text-violet-600" />
+          <span className="hidden sm:inline">Topics</span>
+        </button>
         <button
           onClick={() => setJournalOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
@@ -1221,13 +1279,19 @@ export default function App() {
                   Start typing below, or try one of these topics to see the canvas in action.
                 </p>
                 <div className="flex flex-col gap-2 w-full">
-                  <button onClick={() => { setQuestion("Explain how a Database works."); }} className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
-                    Explain Database Architecture
+                  <button
+                    onClick={() => setTopicExplorerOpen(true)}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-[13px] font-semibold transition shadow-sm"
+                  >
+                    <Compass size={16} /> Explore Topic Starters
                   </button>
-                  <button onClick={() => { setQuestion("How does OAuth 2.0 work?"); }} className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
-                    How does OAuth 2.0 work?
+                  <button onClick={() => { setQuestion("Explain Database Normalization (1NF to BCNF)."); }} className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                    Database Normalization
                   </button>
-                  <button onClick={() => { setQuestion("Draw a flowchart for the React Component Lifecycle."); }} className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                  <button onClick={() => { setQuestion("How does OAuth 2.0 work?"); }} className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                    OAuth 2.0 Auth Code Flow
+                  </button>
+                  <button onClick={() => { setQuestion("Draw a flowchart for the React Component Lifecycle."); }} className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
                     React Component Lifecycle
                   </button>
                 </div>
@@ -1470,6 +1534,16 @@ export default function App() {
             onClose={() => setJournalOpen(false)}
             onLoadSnapshot={handleLoadSnapshot}
             onStartReview={handleStartReview}
+          />
+        </Suspense>
+      )}
+
+      {topicExplorerOpen && (
+        <Suspense fallback={null}>
+          <TopicExplorerModal
+            open={topicExplorerOpen}
+            onClose={() => setTopicExplorerOpen(false)}
+            onSelectTopic={handleSelectTopic}
           />
         </Suspense>
       )}

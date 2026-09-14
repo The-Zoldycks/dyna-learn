@@ -223,3 +223,44 @@ export function decodeShareHash(rawPayload = "") {
 
   return null;
 }
+
+/**
+ * Builds an Anki-compatible CSV string from canvas nodes and edges.
+ * Format: "Front","Back","Tags"
+ */
+export function buildAnkiCSV(nodes = [], edges = []) {
+  const realNodes = nodes.filter((n) => n.id !== "start");
+  if (realNodes.length === 0) return "";
+
+  // Map nodeId -> list of connected node descriptions
+  const connections = new Map();
+  edges.forEach((e) => {
+    const srcNode = nodes.find((n) => n.id === e.source);
+    const tgtNode = nodes.find((n) => n.id === e.target);
+    if (srcNode && tgtNode) {
+      const srcLabel = (srcNode.data?.label || srcNode.id).replace(/\n/g, " ");
+      const tgtLabel = (tgtNode.data?.label || tgtNode.id).replace(/\n/g, " ");
+      const edgeDesc = e.label ? ` (${e.label})` : "";
+
+      if (!connections.has(srcNode.id)) connections.set(srcNode.id, []);
+      connections.get(srcNode.id).push(`Leads to: ${tgtLabel}${edgeDesc}`);
+
+      if (!connections.has(tgtNode.id)) connections.set(tgtNode.id, []);
+      connections.get(tgtNode.id).push(`Originates from: ${srcLabel}${edgeDesc}`);
+    }
+  });
+
+  const escapeCsv = (str) => `"${String(str).replace(/"/g, '""')}"`;
+  const rows = [["Front", "Back", "Tags"].map(escapeCsv).join(",")];
+
+  realNodes.forEach((n) => {
+    const label = (n.data?.label || n.id).replace(/\n/g, " ");
+    const related = connections.get(n.id) || ["Core concept in this diagram"];
+    const backHtml = `<div><strong>${label}</strong><br/><ul>${related.map((r) => `<li>${r}</li>`).join("")}</ul></div>`;
+    const tag = n.data?.highlight ? "dyna-learn #needs-review" : "dyna-learn";
+
+    rows.push([escapeCsv(label), escapeCsv(backHtml), escapeCsv(tag)].join(","));
+  });
+
+  return rows.join("\r\n");
+}
