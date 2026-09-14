@@ -1,7 +1,7 @@
 import {
   ClipboardList, Palette, Code2, Bug, Rocket, Wrench,
   Database, Server, Cloud, Lock, FileText, User, Layers,
-  Cog, Shield, BookOpen, Lightbulb, Network, Cpu, Brain, Sparkles
+  Cog, Shield, BookOpen, Lightbulb, Network, Cpu, Brain, Sparkles, Trash2,
 } from "lucide-react";
 import { Handle, Position, NodeToolbar } from "@xyflow/react";
 
@@ -29,7 +29,7 @@ const iconMap = {
 };
 
 // Preset shapes: rectangle (default), pill (start/end), diamond (decision), circle (state)
-export default function CustomNode({ data, selected }) {
+export default function CustomNode({ id, data, selected }) {
   const Icon = iconMap[data.icon] || BookOpen;
   const isHighlighted = data.highlight === true;
   const shape = data.shape || "rectangle";
@@ -86,6 +86,18 @@ export default function CustomNode({ data, selected }) {
           className="px-2.5 py-1 text-white rounded-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
         >
           <Network size={12} className="text-emerald-300" /> Branch out
+        </button>
+        <div className="w-px h-3 bg-slate-700" />
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('delete-node', { detail: { id, label: data.label } }));
+          }}
+          title="Delete node from canvas"
+          aria-label={`Delete ${data.label}`}
+          className="px-2 py-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg text-[11px] transition-all"
+        >
+          <Trash2 size={12} />
         </button>
       </NodeToolbar>
       <Handle type="target" position={Position.Top} className="!bg-slate-300 !w-2 !h-2 !border-none !-top-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />

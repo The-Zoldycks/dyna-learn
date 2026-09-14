@@ -3,6 +3,7 @@ import {
   ReactFlow,
   Background,
   Controls,
+  MiniMap,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -12,7 +13,7 @@ import "@xyflow/react/dist/style.css";
 import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
-  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass,
+  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -22,6 +23,7 @@ import SimpleMarkdown from "./components/SimpleMarkdown.jsx";
 import QuizCard from "./components/QuizCard.jsx";
 const JournalModal = lazy(() => import("./components/JournalModal.jsx"));
 const TopicExplorerModal = lazy(() => import("./components/TopicExplorerModal.jsx"));
+const FlashcardPracticeModal = lazy(() => import("./components/FlashcardPracticeModal.jsx"));
 import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
 import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
@@ -116,9 +118,20 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
   const [topicExplorerOpen, setTopicExplorerOpen] = useState(false);
+  const [practiceModalOpen, setPracticeModalOpen] = useState(false);
+  const [practiceItems, setPracticeItems] = useState([]);
   const [activeReviewId, setActiveReviewId] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(
+    () => parseFloat(localStorage.getItem("dyna-speech-speed")) || 1
+  );
+  const [autoNarrate, setAutoNarrate] = useState(
+    () => localStorage.getItem("dyna-auto-narrate") !== "false"
+  );
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   const recognitionRef = useRef(null);
@@ -188,7 +201,14 @@ export default function App() {
     chatBottomRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
   }, [chatHistory]);
 
-  // ---- Custom Node Toolbar 'Ask AI' listener ----
+  // ---- Node deletion cleanup ----
+  const onNodesDelete = useCallback((deletedNodes) => {
+    const deletedIds = new Set(deletedNodes.map((n) => n.id));
+    setEdges((eds) => eds.filter((edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target)));
+    setSelectedNodeId((cur) => (deletedIds.has(cur) ? null : cur));
+  }, [setEdges]);
+
+  // ---- Custom Node Toolbar 'Ask AI', 'Branch out', and 'Delete' listeners ----
   useEffect(() => {
     const handleAskNode = (e) => {
       setQuestion(`Explain "${e.detail}" in more detail.`);
@@ -206,13 +226,22 @@ export default function App() {
         if (textarea) textarea.focus();
       }, 50);
     };
+    const handleDeleteNode = (e) => {
+      const { id, label } = e.detail;
+      setNodes((nds) => nds.filter((n) => n.id !== id));
+      setEdges((eds) => eds.filter((edge) => edge.source !== id && edge.target !== id));
+      setSelectedNodeId((cur) => (cur === id ? null : cur));
+      toast.success(`Removed "${label}"`);
+    };
     window.addEventListener("ask-node", handleAskNode);
     window.addEventListener("branch-node", handleBranchNode);
+    window.addEventListener("delete-node", handleDeleteNode);
     return () => {
       window.removeEventListener("ask-node", handleAskNode);
       window.removeEventListener("branch-node", handleBranchNode);
+      window.removeEventListener("delete-node", handleDeleteNode);
     };
-  }, []);
+  }, [setNodes, setEdges]);
 
   // ---- Connectivity detection (Rule 13 — Connectivity States) ----
   useEffect(() => {
@@ -279,7 +308,7 @@ export default function App() {
     const utterance = new SpeechSynthesisUtterance(text);
     const bv = browserVoices.find((v) => v.name === selectedVoice || v.voiceURI === selectedVoice);
     if (bv) utterance.voice = bv;
-    utterance.rate = 1; utterance.pitch = 1; utterance.volume = 1;
+    utterance.rate = playbackSpeed; utterance.pitch = 1; utterance.volume = 1;
     utterance.lang = bv?.lang || "en-US";
     utterance.onstart  = () => { setIsSpeaking(true); setIsPaused(false); };
     utterance.onend    = () => { setIsSpeaking(false); setIsPaused(false); };
@@ -287,7 +316,7 @@ export default function App() {
     utterance.onpause  = () => setIsPaused(true);
     utterance.onresume = () => setIsPaused(false);
     window.speechSynthesis.speak(utterance);
-  }, [browserVoices, selectedVoice, cleanupAudio]);
+  }, [browserVoices, selectedVoice, playbackSpeed, cleanupAudio]);
 
   // ---- TTS: Edge Neural ----
   const speakEdge = useCallback(async (text) => {
@@ -307,6 +336,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       audioUrlRef.current = url;
       const audio = new Audio(url);
+      audio.playbackRate = playbackSpeed;
       audioRef.current = audio;
 
       audio.onplay   = () => { setIsTTSLoading(false); setIsSpeaking(true); setIsPaused(false); };
@@ -331,7 +361,24 @@ export default function App() {
       console.warn("Edge TTS failed, falling back:", e.message);
       return false;
     }
-  }, [selectedVoice, cleanupAudio]);
+  }, [selectedVoice, playbackSpeed, cleanupAudio]);
+
+  const cyclePlaybackSpeed = useCallback(() => {
+    const speeds = [1, 1.25, 1.5, 2];
+    setPlaybackSpeed((prev) => {
+      const nextIndex = (speeds.indexOf(prev) + 1) % speeds.length;
+      const next = speeds[nextIndex !== -1 ? nextIndex : 0];
+      localStorage.setItem("dyna-speech-speed", String(next));
+      if (audioRef.current) audioRef.current.playbackRate = next;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackSpeed;
+    }
+  }, [playbackSpeed]);
 
   // ---- Stable isEdgeVoice ----
   const isEdgeVoice = useCallback(
@@ -646,7 +693,11 @@ export default function App() {
 
       if (speech_text || quiz) {
         if (speech_text) {
-          speakText(speech_text);
+          if (autoNarrate) {
+            speakText(speech_text);
+          } else {
+            setLastSpeech(speech_text);
+          }
         }
         setChatHistory((prev) => {
           const next = [
@@ -691,7 +742,7 @@ export default function App() {
       });
       return false;
     } finally { setLoading(false); }
-  }, [speakText, applyDiagramUpdateStable]);
+  }, [speakText, applyDiagramUpdateStable, autoNarrate]);
 
   // ---- Form submit ----
   const handleSubmit = async (e) => {
@@ -1013,6 +1064,12 @@ export default function App() {
     }, 250);
   }, [setNodes, setEdges, triggerFitView, executeTutor]);
 
+  const handleStartPractice = useCallback((items) => {
+    setJournalOpen(false);
+    setPracticeItems(items);
+    setPracticeModalOpen(true);
+  }, []);
+
   // ---- Derived state ----
   const selectedNodeLabel = useMemo(
     () => selectedNodeId ? nodes.find((n) => n.id === selectedNodeId)?.data?.label || selectedNodeId : null,
@@ -1020,6 +1077,21 @@ export default function App() {
   );
   const hasHighlightedNodes = useMemo(() => nodes.some((n) => n.data?.highlight), [nodes]);
   const isCanvasLarge = nodes.length > 25;
+
+  const filteredChat = useMemo(() => {
+    if (!chatSearchQuery.trim()) {
+      return chatHistory.map((turn, originalIdx) => ({ turn, originalIdx }));
+    }
+    const q = chatSearchQuery.trim().toLowerCase();
+    return chatHistory
+      .map((turn, originalIdx) => ({ turn, originalIdx }))
+      .filter(({ turn }) => {
+        const matchText = (turn.text || "").toLowerCase().includes(q);
+        const matchQuiz = (turn.quiz?.question || "").toLowerCase().includes(q) ||
+          (turn.quiz?.options || []).some((opt) => opt.toLowerCase().includes(q));
+        return matchText || matchQuiz;
+      });
+  }, [chatHistory, chatSearchQuery]);
 
   // ---- JSX ----
   return (
@@ -1057,6 +1129,7 @@ export default function App() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodesDelete={onNodesDelete}
           nodeTypes={nodeTypes}
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
@@ -1068,9 +1141,33 @@ export default function App() {
         >
           <Background color="#cbd5e1" gap={24} size={1.5} />
           <Controls className="mb-[60px] sm:mb-0 bg-white/90 backdrop-blur border-slate-200 shadow-sm" />
-          
+
+          {/* Collapsible Canvas Radar Minimap */}
+          {showMinimap && (
+            <MiniMap
+              position="bottom-left"
+              className="mb-[60px] sm:mb-2 ml-2 !bg-white/90 !backdrop-blur-md !border !border-slate-200 !rounded-2xl !shadow-lg overflow-hidden"
+              nodeColor={(n) => (n.data?.highlight ? "#fb7185" : "#8b5cf6")}
+              maskColor="rgba(241, 245, 249, 0.7)"
+              zoomable
+              pannable
+            />
+          )}
+
           {/* Floating Action Bar (Canvas Controls) */}
           <Panel position="bottom-right" className="flex items-center gap-2 mb-[60px] sm:mb-2 mr-2">
+            <button
+              onClick={() => setShowMinimap((prev) => !prev)}
+              title={showMinimap ? "Hide canvas minimap" : "Show canvas minimap"}
+              aria-label="Toggle canvas minimap"
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-full border shadow-sm transition ${
+                showMinimap
+                  ? "bg-violet-600 text-white border-violet-600 shadow-xs"
+                  : "bg-white/90 backdrop-blur border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <Map size={13} /> <span className="hidden sm:inline">{showMinimap ? "Hide Map" : "Minimap"}</span>
+            </button>
             <button
               onClick={handleShare}
               disabled={nodes.length <= 1}
@@ -1168,9 +1265,52 @@ export default function App() {
 
           {/* Panel header */}
           <div className="p-4 border-b border-slate-100 shrink-0">
-            <h2 className="flex items-center gap-2 font-semibold text-slate-800 text-sm">
-              <Sparkles size={14} className="text-violet-600" /> Ask Dyna-learn
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 font-semibold text-slate-800 text-sm">
+                <Sparkles size={14} className="text-violet-600" /> Ask Dyna-learn
+              </h2>
+              {chatHistory.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChatSearchOpen((prev) => !prev);
+                    if (chatSearchOpen) setChatSearchQuery("");
+                  }}
+                  className={`p-1.5 rounded-lg border transition ${
+                    chatSearchOpen
+                      ? "bg-violet-100 text-violet-700 border-violet-300"
+                      : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                  }`}
+                  aria-label={chatSearchOpen ? "Close chat search" : "Search conversation"}
+                  title="Search conversation"
+                >
+                  <Search size={13} />
+                </button>
+              )}
+            </div>
+            {chatSearchOpen && (
+              <div className="mt-2.5 relative flex items-center">
+                <Search size={13} className="absolute left-2.5 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={chatSearchQuery}
+                  onChange={(e) => setChatSearchQuery(e.target.value)}
+                  placeholder="Search discussion..."
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white"
+                  autoFocus
+                />
+                {chatSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setChatSearchQuery("")}
+                    className="absolute right-2 text-slate-400 hover:text-slate-600 text-xs p-0.5"
+                    aria-label="Clear search"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )}
             <p className="text-xs text-slate-500 mt-1">Click a node + ask — tutor adapts to canvas &amp; history.</p>
 
             {/* Selected node badge & quick actions */}
@@ -1264,6 +1404,30 @@ export default function App() {
                     : <option value="">Default system voice</option>}
                 </optgroup>
               </select>
+              <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-200/60">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoNarrate}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setAutoNarrate(val);
+                      localStorage.setItem("dyna-auto-narrate", String(val));
+                    }}
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                  />
+                  <span className="text-[11px] font-medium text-slate-600">Auto-narrate</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={cyclePlaybackSpeed}
+                  className="px-2 py-0.5 rounded-md bg-white border border-slate-200 hover:border-violet-300 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 transition"
+                  title="Cycle playback speed (1x, 1.25x, 1.5x, 2x)"
+                  aria-label={`Playback speed: ${playbackSpeed}x. Click to change.`}
+                >
+                  {playbackSpeed}x speed
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1298,56 +1462,80 @@ export default function App() {
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide px-2">Conversation</p>
-                <div className="space-y-2">
-                  {chatHistory.map((turn, idx) => {
-                    const isExpanded = expandedIds.has(idx);
-                    const isLong = turn.text.length > 220;
-                    const displayText = !isLong || isExpanded ? turn.text : turn.text.slice(0, 220) + "…";
-                    return (
-                      <div
-                        key={idx}
-                        className={`text-[13px] leading-relaxed ${
-                          turn.role === "user"
-                            ? "bg-slate-900 text-white rounded-[20px] rounded-br-sm px-4 py-3 ml-8 shadow-sm"
-                            : "text-slate-800 pr-4 mt-2 mb-4"
-                        }`}
-                      >
-                        {turn.role === "user" ? null : (
-                          <div className="flex items-center gap-2 mb-1 opacity-60">
-                            <Sparkles size={12} className="text-violet-600" />
-                            <span className="font-semibold text-[10px] uppercase tracking-wider text-violet-700">Tutor</span>
-                          </div>
-                        )}
-
-                        {/* Render tutor responses with markdown, user messages as plain text */}
-                        {turn.role === "model" ? (
-                          <>
-                            <SimpleMarkdown text={displayText} className="mt-1 text-[13px] leading-relaxed" />
-                            {turn.quiz && <QuizCard quiz={turn.quiz} onComplete={(passed) => handleQuizComplete(passed, idx)} />}
-                          </>
-                        ) : (
-                          <div className="mt-1">
-                            {turn.image && (
-                              <img src={turn.image} alt="User uploaded" className="max-w-[120px] rounded mb-2 border border-slate-700/50" />
-                            )}
-                            <p className="whitespace-pre-wrap break-words">{displayText}</p>
-                          </div>
-                        )}
-
-                        {isLong && (
-                          <button
-                            onClick={() => toggleExpand(idx)}
-                            className={`mt-2 text-[10px] font-medium flex items-center gap-1 opacity-70 hover:opacity-100 ${turn.role === 'user' ? 'text-white' : 'text-slate-500'}`}
-                          >
-                            {isExpanded ? <>Show less <ChevronUp size={10} /></> : <>Read more <ChevronDown size={10} /></>}
-                          </button>
-                        )}
-
-                      </div>
-                    );
-                  })}
+                <div className="flex items-center justify-between px-2">
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                    {chatSearchQuery.trim()
+                      ? `Found ${filteredChat.length} match${filteredChat.length === 1 ? "" : "es"}`
+                      : "Conversation"}
+                  </p>
+                  {chatSearchQuery.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => setChatSearchQuery("")}
+                      className="text-[11px] text-violet-600 hover:text-violet-800 font-medium"
+                    >
+                      Clear search
+                    </button>
+                  )}
                 </div>
+
+                {filteredChat.length === 0 ? (
+                  <div className="text-center py-8 px-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 my-2">
+                    <Search size={18} className="mx-auto text-slate-400 mb-1.5" />
+                    <p className="text-xs font-semibold text-slate-700">No matching messages</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Nothing matches &ldquo;{chatSearchQuery}&rdquo;.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredChat.map(({ turn, originalIdx }) => {
+                      const isExpanded = expandedIds.has(originalIdx);
+                      const isLong = turn.text.length > 220;
+                      const displayText = !isLong || isExpanded ? turn.text : turn.text.slice(0, 220) + "…";
+                      return (
+                        <div
+                          key={originalIdx}
+                          className={`text-[13px] leading-relaxed ${
+                            turn.role === "user"
+                              ? "bg-slate-900 text-white rounded-[20px] rounded-br-sm px-4 py-3 ml-8 shadow-sm"
+                              : "text-slate-800 pr-4 mt-2 mb-4"
+                          }`}
+                        >
+                          {turn.role === "user" ? null : (
+                            <div className="flex items-center gap-2 mb-1 opacity-60">
+                              <Sparkles size={12} className="text-violet-600" />
+                              <span className="font-semibold text-[10px] uppercase tracking-wider text-violet-700">Tutor</span>
+                            </div>
+                          )}
+
+                          {/* Render tutor responses with markdown, user messages as plain text */}
+                          {turn.role === "model" ? (
+                            <>
+                              <SimpleMarkdown text={displayText} className="mt-1 text-[13px] leading-relaxed" />
+                              {turn.quiz && <QuizCard quiz={turn.quiz} onComplete={(passed) => handleQuizComplete(passed, originalIdx)} />}
+                            </>
+                          ) : (
+                            <div className="mt-1">
+                              {turn.image && (
+                                <img src={turn.image} alt="User uploaded" className="max-w-[120px] rounded mb-2 border border-slate-700/50" />
+                              )}
+                              <p className="whitespace-pre-wrap break-words">{displayText}</p>
+                            </div>
+                          )}
+
+                          {isLong && (
+                            <button
+                              onClick={() => toggleExpand(originalIdx)}
+                              className={`mt-2 text-[10px] font-medium flex items-center gap-1 opacity-70 hover:opacity-100 ${turn.role === 'user' ? 'text-white' : 'text-slate-500'}`}
+                            >
+                              {isExpanded ? <>Show less <ChevronUp size={10} /></> : <>Read more <ChevronDown size={10} /></>}
+                            </button>
+                          )}
+
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
             {loading && <ChatSkeleton />}
@@ -1495,6 +1683,15 @@ export default function App() {
                   <button onClick={handleReplay} disabled={isSpeaking || isTTSLoading} className="flex-1 py-1.5 rounded-lg bg-violet-600 text-white text-xs disabled:opacity-40">Replay</button>
                   <button onClick={isPaused ? resumeSpeech : pauseSpeech} disabled={!isSpeaking && !isPaused} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-200 text-xs disabled:opacity-40">{isPaused ? "Resume" : "Pause"}</button>
                   <button onClick={stopSpeech} disabled={!isSpeaking && !isPaused && !isTTSLoading} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-200 text-xs disabled:opacity-40">Stop</button>
+                  <button
+                    type="button"
+                    onClick={cyclePlaybackSpeed}
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:border-violet-300 text-xs font-semibold text-violet-700 hover:bg-violet-50 transition"
+                    title="Cycle playback speed"
+                    aria-label={`Playback speed: ${playbackSpeed}x. Click to change.`}
+                  >
+                    {playbackSpeed}x
+                  </button>
                 </div>
               </div>
             )}
@@ -1534,6 +1731,7 @@ export default function App() {
             onClose={() => setJournalOpen(false)}
             onLoadSnapshot={handleLoadSnapshot}
             onStartReview={handleStartReview}
+            onPracticeCards={handleStartPractice}
           />
         </Suspense>
       )}
@@ -1544,6 +1742,19 @@ export default function App() {
             open={topicExplorerOpen}
             onClose={() => setTopicExplorerOpen(false)}
             onSelectTopic={handleSelectTopic}
+          />
+        </Suspense>
+      )}
+
+      {practiceModalOpen && (
+        <Suspense fallback={null}>
+          <FlashcardPracticeModal
+            open={practiceModalOpen}
+            onClose={() => setPracticeModalOpen(false)}
+            items={practiceItems}
+            onFinish={() => {
+              toast.success("Great job! Spaced repetition intervals updated.", { icon: "🎉" });
+            }}
           />
         </Suspense>
       )}

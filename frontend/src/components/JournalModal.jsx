@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight, BarChart3, Search } from "lucide-react";
+import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight, BarChart3, Search, RotateCw } from "lucide-react";
 import { getStreak, getSnapshots, getDueReviews, deleteSnapshot } from "../utils/storage";
 import { getStats } from "../utils/analytics";
 
-export default function JournalModal({ open, onClose, onLoadSnapshot, onStartReview }) {
+export default function JournalModal({ open, onClose, onLoadSnapshot, onStartReview, onPracticeCards }) {
   const [streak] = useState(() => getStreak());
   const [snapshots, setSnapshots] = useState(() => getSnapshots());
   const [dueReviews] = useState(() => getDueReviews());
@@ -198,10 +198,20 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
           {/* SRS Due Reviews */}
           {(activeTab === "all" || activeTab === "reviews") && filteredReviews.length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-violet-500" />
-                Concepts to Review ({filteredReviews.length})
-              </h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-violet-500" />
+                  Concepts to Review ({filteredReviews.length})
+                </h3>
+                {onPracticeCards && (
+                  <button
+                    onClick={() => onPracticeCards(filteredReviews)}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold shadow-xs transition"
+                  >
+                    <RotateCw size={12} /> Practice Cards ({filteredReviews.length})
+                  </button>
+                )}
+              </div>
               <div className="space-y-2">
                 {filteredReviews.map((item) => (
                   <div key={item.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-white shadow-sm hover:border-violet-300 transition">
