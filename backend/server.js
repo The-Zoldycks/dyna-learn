@@ -299,10 +299,10 @@ Context you MUST use:
 
 Rules:
 - Always respond with valid JSON matching the required schema.
-- speech_text: Provide a highly detailed, comprehensive, and in-depth explanation. Do NOT be overly concise. Break down complex topics into multi-paragraph responses using markdown formatting (bullet points, bold text, etc.) to ensure the student fully grasps the underlying mechanics.
+- speech_text: Provide a highly detailed, comprehensive, and pedagogical explanation. Structure your response using markdown with clear section headers (## or ###), bullet points, code snippets (\`\`\`lang) when illustrating code/syntax, and blockquotes (> Note) for key takeaways so the explanation is clear and deep.
 - diagram_update.action MUST be one of: add_nodes, add_edges, update_nodes, clear_canvas, quiz, none.
   - quiz: use this ONLY when the student explicitly asks to be tested or quizzed. Provide exactly 3 multiple-choice questions in the root "quiz" object. speech_text should introduce the quiz.
-  - add_nodes: construct rich, highly detailed architectural and conceptual flowcharts. When breaking down complex systems, use 8-15 nodes to illustrate complete lifecycles, data flows, and sub-components. **CRITICAL: If a node is selected, YOU MUST branch out from that selected node by adding edges that connect the selected node's ID to your new nodes.** Provide nodes with id, label, icon (MUST be one of: ${allowedIcons.join(",")}). DO NOT provide position. Provide edges array to connect them logically.
+  - add_nodes: construct rich, highly detailed architectural and conceptual flowcharts. When breaking down complex systems, use 8-15 nodes to illustrate complete lifecycles, data flows, and sub-components. **CRITICAL: If a node is selected, YOU MUST branch out from that selected node by adding edges that connect the selected node's ID to your new nodes.** If no node is selected, connect new nodes logically to existing nodes on the canvas where relevant so the diagram grows as a connected graph. Provide nodes with id, label, icon (MUST be one of: ${allowedIcons.join(",")}). DO NOT provide position. Provide edges array to connect them logically.
   - add_edges: add connections between nodes (provide edges with id, source, target, optional label).
   - update_nodes: highlight or update an existing node (e.g., if student is confused about selected node, set highlight:true).
   - clear_canvas: reset the canvas (provide empty nodes/edges).
@@ -330,14 +330,14 @@ Rules:
 
     const currentParts = [{ text: currentPromptText }];
 
-    // Inject Multimodal image if provided — allowlist mime types, cap base64 size
+    // Inject Multimodal image if provided — allowlist mime types, cap base64 size (7MB base64 ~ 5MB binary)
     const IMAGE_ALLOWLIST = ["image/png", "image/jpeg", "image/webp"];
     if (image && image.base64 && image.mimeType) {
       if (!IMAGE_ALLOWLIST.includes(image.mimeType)) {
         return res.status(400).json({ error: "Unsupported image type (png/jpeg/webp only)", code: "VALIDATION_ERROR" });
       }
-      if (image.base64.length > 2 * 1024 * 1024) {
-        return res.status(400).json({ error: "Image too large (2MB base64 max)", code: "VALIDATION_ERROR" });
+      if (image.base64.length > 7 * 1024 * 1024) {
+        return res.status(400).json({ error: "Image too large (5MB binary max)", code: "VALIDATION_ERROR" });
       }
       currentParts.push({
         inlineData: {
