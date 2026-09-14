@@ -189,15 +189,27 @@ export default function App() {
   // ---- Custom Node Toolbar 'Ask AI' listener ----
   useEffect(() => {
     const handleAskNode = (e) => {
-      setQuestion(`Explain ${e.detail} in more detail.`);
+      setQuestion(`Explain "${e.detail}" in more detail.`);
       setMobileTab("chat"); // ensure we switch to chat on mobile
       setTimeout(() => {
-        const textarea = document.querySelector('textarea');
+        const textarea = document.querySelector("textarea");
         if (textarea) textarea.focus();
       }, 50);
     };
-    window.addEventListener('ask-node', handleAskNode);
-    return () => window.removeEventListener('ask-node', handleAskNode);
+    const handleBranchNode = (e) => {
+      setQuestion(`Break down "${e.detail}" into sub-concepts and expand the diagram.`);
+      setMobileTab("chat");
+      setTimeout(() => {
+        const textarea = document.querySelector("textarea");
+        if (textarea) textarea.focus();
+      }, 50);
+    };
+    window.addEventListener("ask-node", handleAskNode);
+    window.addEventListener("branch-node", handleBranchNode);
+    return () => {
+      window.removeEventListener("ask-node", handleAskNode);
+      window.removeEventListener("branch-node", handleBranchNode);
+    };
   }, []);
 
   // ---- Connectivity detection (Rule 13 — Connectivity States) ----
@@ -1103,13 +1115,63 @@ export default function App() {
             </h2>
             <p className="text-xs text-slate-500 mt-1">Click a node + ask — tutor adapts to canvas &amp; history.</p>
 
-            {/* Selected node badge */}
+            {/* Selected node badge & quick actions */}
             {selectedNodeId && (
-              <div className="mt-3 flex items-center gap-2 text-xs bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
-                <MousePointerClick size={12} className="text-violet-600" />
-                <span className="font-medium text-violet-700">Selected:</span>
-                <span className="truncate flex-1">{selectedNodeLabel}</span>
-                <button onClick={() => setSelectedNodeId(null)} className="text-violet-600 hover:text-violet-800 underline ml-2">Clear</button>
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center gap-2 text-xs bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+                  <MousePointerClick size={12} className="text-violet-600 shrink-0" />
+                  <span className="font-medium text-violet-700 shrink-0">Selected:</span>
+                  <span className="truncate flex-1 font-semibold text-violet-950">{selectedNodeLabel}</span>
+                  <button
+                    onClick={() => setSelectedNodeId(null)}
+                    aria-label="Deselect node"
+                    className="text-violet-600 hover:text-violet-800 underline ml-2 text-[11px]"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuestion(`Explain "${selectedNodeLabel}" in depth and how it works.`);
+                      document.querySelector("textarea")?.focus();
+                    }}
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm"
+                  >
+                    🔍 Deep dive
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuestion(`Break down "${selectedNodeLabel}" into sub-concepts on the canvas.`);
+                      document.querySelector("textarea")?.focus();
+                    }}
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm"
+                  >
+                    🌱 Break down
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuestion(`Quiz me on "${selectedNodeLabel}".`);
+                      document.querySelector("textarea")?.focus();
+                    }}
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm"
+                  >
+                    🎯 Quiz me
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuestion(`Give a real-world analogy or example for "${selectedNodeLabel}".`);
+                      document.querySelector("textarea")?.focus();
+                    }}
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm"
+                  >
+                    💡 Analogy
+                  </button>
+                </div>
               </div>
             )}
 

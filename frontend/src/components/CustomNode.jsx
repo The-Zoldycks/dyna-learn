@@ -67,15 +67,25 @@ export default function CustomNode({ data, selected }) {
       style={diamondStyle}
       title={isHighlighted ? "Highlighted — student confusion detected. Review this concept." : undefined}
     >
-      <NodeToolbar isVisible={selected} position={Position.Top} className="mb-2">
+      <NodeToolbar isVisible={selected} position={Position.Top} className="mb-2 flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1 rounded-xl shadow-xl border border-slate-800">
         <button 
           onClick={(e) => {
             e.stopPropagation();
             window.dispatchEvent(new CustomEvent('ask-node', { detail: data.label }));
           }}
-          className="px-3 py-1.5 bg-slate-900 text-white rounded-lg shadow-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
+          className="px-2.5 py-1 text-white rounded-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
         >
-          <Sparkles size={12} className="text-violet-300" /> Ask about this
+          <Sparkles size={12} className="text-violet-300" /> Explain
+        </button>
+        <div className="w-px h-3 bg-slate-700" />
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            window.dispatchEvent(new CustomEvent('branch-node', { detail: data.label }));
+          }}
+          className="px-2.5 py-1 text-white rounded-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
+        >
+          <Network size={12} className="text-emerald-300" /> Branch out
         </button>
       </NodeToolbar>
       <Handle type="target" position={Position.Top} className="!bg-slate-300 !w-2 !h-2 !border-none !-top-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
