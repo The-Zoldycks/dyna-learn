@@ -13,7 +13,7 @@ import "@xyflow/react/dist/style.css";
 import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
-  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search,
+  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search, Droplets,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -24,6 +24,7 @@ import QuizCard from "./components/QuizCard.jsx";
 const JournalModal = lazy(() => import("./components/JournalModal.jsx"));
 const TopicExplorerModal = lazy(() => import("./components/TopicExplorerModal.jsx"));
 const FlashcardPracticeModal = lazy(() => import("./components/FlashcardPracticeModal.jsx"));
+const FluidBackdrop = lazy(() => import("./components/FluidBackdrop.jsx"));
 import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
 import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
@@ -115,6 +116,18 @@ export default function App() {
   const [selectedVoice, setSelectedVoice] = useState(
     () => localStorage.getItem("dyna-voice") || "en-US-AriaNeural"
   );
+  // Fluid cursor backdrop — default on for fine pointers unless reduced motion is preferred
+  const [fluidOn, setFluidOn] = useState(() => {
+    try {
+      const saved = localStorage.getItem("dyna-fluid");
+      if (saved !== null) return saved === "1";
+      const fine = window.matchMedia?.("(pointer: fine)").matches ?? true;
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      return fine && !reduced;
+    } catch {
+      return true;
+    }
+  });
   const [isListening, setIsListening] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
   const [topicExplorerOpen, setTopicExplorerOpen] = useState(false);
@@ -283,6 +296,7 @@ export default function App() {
 
   // Persist selected voice
   useEffect(() => { if (selectedVoice) localStorage.setItem("dyna-voice", selectedVoice); }, [selectedVoice]);
+  useEffect(() => { try { localStorage.setItem("dyna-fluid", fluidOn ? "1" : "0"); } catch {} }, [fluidOn]);
 
   // ---- Helpers ----
   const toggleExpand = (idx) => {
@@ -1096,6 +1110,11 @@ export default function App() {
   // ---- JSX ----
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#fafafa] text-slate-900 font-sans antialiased supports-[height:100dvh]:h-[100dvh]">
+      {fluidOn && (
+        <Suspense fallback={null}>
+          <FluidBackdrop />
+        </Suspense>
+      )}
 
       {/* ── Accessibility: Screen reader live region (Rule 20) ── */}
       <div
@@ -1249,6 +1268,20 @@ export default function App() {
         >
           <Save size={14} />
           <span className="hidden sm:inline">Save</span>
+        </button>
+        <button
+          onClick={() => setFluidOn((v) => !v)}
+          aria-pressed={fluidOn}
+          aria-label={fluidOn ? "Turn off fluid cursor background" : "Turn on fluid cursor background"}
+          title={fluidOn ? "Fluid background: on" : "Fluid background: off"}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+            fluidOn
+              ? "bg-violet-100 text-violet-700 hover:bg-violet-200"
+              : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          }`}
+        >
+          <Droplets size={14} />
+          <span className="hidden sm:inline">Fluid</span>
         </button>
         <div className="w-px h-5 bg-slate-300 mx-1 hidden sm:block" />
         <button
