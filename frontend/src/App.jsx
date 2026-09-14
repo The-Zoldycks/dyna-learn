@@ -116,6 +116,7 @@ export default function App() {
   const [journalOpen, setJournalOpen] = useState(false);
   const [activeReviewId, setActiveReviewId] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   const recognitionRef = useRef(null);
@@ -755,6 +756,27 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleExportSVG = useCallback(() => {
+    const instance = reactFlowInstanceRef.current;
+    if (!instance) return;
+    try {
+      const built = buildDiagramSVG(instance.getNodes(), instance.getEdges());
+      if (!built) return;
+      const blob = new Blob([built.text], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.download = `dyna-learn-${Date.now()}.svg`;
+      anchor.href = url;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      track("diagram_exported", { format: "svg" });
+      toast.success("Diagram exported as vector SVG!", { duration: 2500 });
+    } catch (err) {
+      console.error("SVG export failed:", err);
+      toast.error("SVG export failed — try again.");
+    }
+  }, []);
+
   // ---- Voice Input (tap-to-toggle with auto-append) ---------------------
   const toggleVoice = useCallback((e) => {
     e.preventDefault();
@@ -794,9 +816,12 @@ export default function App() {
     }
   }, [loading, isListening]);
 
-  const handleImageChange = useCallback((e) => {
-    const file = e.target.files[0];
+  const processImageFile = useCallback((file) => {
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file (PNG, JPG, WebP, etc.).");
+      return;
+    }
     if (file.size > 5 * 1024 * 1024) {
       toast.error("Image must be under 5MB for the Gemini API.");
       return;
@@ -804,17 +829,64 @@ export default function App() {
     const reader = new FileReader();
     reader.onloadend = () => {
       const result = reader.result;
-      const base64 = result.split(',')[1];
+      const base64 = result.split(",")[1];
       setSelectedImage({
         dataUrl: result,
         base64: base64,
-        mimeType: file.type
+        mimeType: file.type,
       });
+      toast.success("Image attached! Ask a question or press send.");
+    };
+    reader.onerror = () => {
+      toast.error("Failed to read image file.");
     };
     reader.readAsDataURL(file);
     // Reset file input so same file can be selected again if needed
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
+
+  const handleImageChange = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (file) processImageFile(file);
+  }, [processImageFile]);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!loading && !isDraggingImage) setIsDraggingImage(true);
+  }, [loading, isDraggingImage]);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDraggingImage(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingImage(false);
+    if (loading) return;
+    const file = e.dataTransfer?.files?.[0];
+    if (file) processImageFile(file);
+  }, [loading, processImageFile]);
+
+  const handlePaste = useCallback((e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          processImageFile(file);
+          break;
+        }
+      }
+    }
+  }, [processImageFile]);
 
   const handleShare = useCallback(async () => {
     if (nodes.length <= 1) return;
@@ -953,14 +1025,27 @@ export default function App() {
             >
               <Network size={14} className="text-violet-600" /> Share
             </button>
-            <button
-              onClick={handleExportPNG}
-              disabled={nodes.length <= 1}
-              title="Download diagram as PNG"
-              className="flex items-center gap-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-full px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Download size={14} className="text-violet-600" /> Export
-            </button>
+            <div className="flex items-center bg-white/90 backdrop-blur border border-slate-200 rounded-full shadow-sm overflow-hidden p-0.5">
+              <button
+                onClick={handleExportPNG}
+                disabled={nodes.length <= 1}
+                title="Download diagram as PNG image"
+                aria-label="Download diagram as PNG"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full"
+              >
+                <Download size={13} className="text-violet-600" /> PNG
+              </button>
+              <div className="w-px h-3.5 bg-slate-200" />
+              <button
+                onClick={handleExportSVG}
+                disabled={nodes.length <= 1}
+                title="Download diagram as scalable vector SVG"
+                aria-label="Download diagram as SVG"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full"
+              >
+                SVG
+              </button>
+            </div>
           </Panel>
 
           {/* Highlight legend */}
@@ -1148,14 +1233,29 @@ export default function App() {
           {/* Fixed bottom area: Form & Mini-player */}
           <div className="p-4 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
             {/* Question form */}
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-              
+            <form
+              onSubmit={handleSubmit}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className="relative flex flex-col gap-3"
+            >
+              {/* Drag-and-drop overlay */}
+              {isDraggingImage && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-violet-50/95 border-2 border-dashed border-violet-500 rounded-xl backdrop-blur-sm pointer-events-none transition-all">
+                  <Image size={24} className="text-violet-600 mb-1 animate-bounce" />
+                  <p className="text-xs font-semibold text-violet-900">Drop image here to attach</p>
+                  <p className="text-[10px] text-violet-600 mt-0.5">Under 5MB · PNG, JPG, WebP</p>
+                </div>
+              )}
+
               {selectedImage && (
                 <div className="relative inline-block w-fit mb-[-4px]">
                   <img src={selectedImage.dataUrl} alt="Upload preview" className="h-16 w-auto rounded-md border border-slate-200 shadow-sm" />
                   <button
                     type="button"
                     onClick={() => setSelectedImage(null)}
+                    aria-label="Remove attached image"
                     className="absolute -top-2 -right-2 bg-white rounded-full text-slate-500 hover:text-red-600 transition"
                   >
                     <XCircle size={16} className="fill-white" />
@@ -1166,6 +1266,7 @@ export default function App() {
               <textarea
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
+                onPaste={handlePaste}
                 onKeyDown={(e) => {
                   // Ctrl+Enter (or Cmd+Enter on Mac) submits
                   if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !loading && (question.trim() || selectedImage)) {
