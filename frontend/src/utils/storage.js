@@ -40,31 +40,41 @@ export function getSnapshots() {
 }
 
 export function saveSnapshot(title, nodes, edges, chatHistory) {
-  try {
-    const snaps = getSnapshots();
-    // Strip large base64 images from chatHistory to prevent hitting 5MB localStorage limit
-    const cleanHistory = chatHistory.map(turn => {
-      if (!turn.image) return turn;
-      const { image: _image, ...rest } = turn;
-      return rest;
-    });
+  const snaps = getSnapshots();
+  // Strip large base64 images from chatHistory to prevent hitting 5MB localStorage limit
+  const cleanHistory = chatHistory.map((turn) => {
+    if (!turn.image) return turn;
+    const { image: _image, ...rest } = turn;
+    return rest;
+  });
 
-    const newSnap = {
-      id: "snap_" + Date.now(),
-      title,
-      date: new Date().toISOString(),
-      nodes,
-      edges,
-      chatHistory: cleanHistory
-    };
-    // Keep max 20 snapshots to avoid quota limits
-    const updated = [newSnap, ...snaps].slice(0, 20);
-    localStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(updated));
-    return newSnap;
-  } catch (err) {
-    console.error("Failed to save snapshot", err);
-    throw new Error("Failed to save snapshot (Storage full?)");
+  const newSnap = {
+    id: "snap_" + Date.now(),
+    title,
+    date: new Date().toISOString(),
+    nodes,
+    edges,
+    chatHistory: cleanHistory,
+  };
+
+  let candidates = [newSnap, ...snaps].slice(0, 20);
+  let saved = false;
+
+  // Evict oldest snapshot if browser quota is reached
+  while (!saved && candidates.length > 0) {
+    try {
+      localStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(candidates));
+      saved = true;
+    } catch {
+      if (candidates.length > 1) {
+        candidates.pop(); // drop oldest snapshot to free space
+      } else {
+        throw new Error("Storage quota exceeded. Please clear some saved lessons.");
+      }
+    }
   }
+
+  return newSnap;
 }
 
 export function deleteSnapshot(id) {
