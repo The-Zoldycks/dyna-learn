@@ -1,3 +1,31 @@
+import { useState } from "react";
+
+function CodeBlock({ code, lang }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative my-2 rounded-xl bg-slate-900 text-slate-100 p-3 text-xs font-mono overflow-x-auto border border-slate-800 shadow-sm">
+      <div className="flex items-center justify-between mb-1.5 text-[10px] text-slate-400 font-bold tracking-wider">
+        <span>{lang ? lang.toUpperCase() : "CODE"}</span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          aria-label="Copy code"
+          className="text-[10px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 transition font-sans"
+        >
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
+      <pre className="whitespace-pre">{code}</pre>
+    </div>
+  );
+}
+
 /**
  * SimpleMarkdown — lightweight full-feature markdown renderer (zero external deps).
  * Handles: code blocks (```), headings (#, ##, ###), blockquotes (>),
@@ -20,10 +48,11 @@ export default function SimpleMarkdown({ text, className = "" }) {
     if (trimmed.startsWith("```")) {
       if (inCodeBlock) {
         elements.push(
-          <div key={`code-${i}`} className="my-2 rounded-xl bg-slate-900 text-slate-100 p-3 text-xs font-mono overflow-x-auto border border-slate-800 shadow-sm">
-            {codeLang && <div className="text-[10px] text-slate-400 mb-1.5 uppercase font-bold tracking-wider">{codeLang}</div>}
-            <pre className="whitespace-pre">{codeBuffer.join("\n")}</pre>
-          </div>
+          <CodeBlock
+            key={`code-${i}`}
+            code={codeBuffer.join("\n")}
+            lang={codeLang}
+          />
         );
         codeBuffer = [];
         codeLang = "";
@@ -116,9 +145,11 @@ export default function SimpleMarkdown({ text, className = "" }) {
   // Unclosed code block safety fallback
   if (inCodeBlock && codeBuffer.length) {
     elements.push(
-      <div key="code-unclosed" className="my-2 rounded-xl bg-slate-900 text-slate-100 p-3 text-xs font-mono overflow-x-auto border border-slate-800 shadow-sm">
-        <pre className="whitespace-pre">{codeBuffer.join("\n")}</pre>
-      </div>
+      <CodeBlock
+        key="code-unclosed"
+        code={codeBuffer.join("\n")}
+        lang={codeLang}
+      />
     );
   }
 
