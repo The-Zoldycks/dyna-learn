@@ -11,7 +11,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
-  ChevronUp, Mic,
+  ChevronUp, ChevronDown, Mic,
   MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -171,7 +171,7 @@ export default function App() {
       // Strip image dataUrls before persisting — one 5MB upload would blow the sessionStorage quota
       const lean = chatHistory.map((turn) => {
         if (!turn.image) return turn;
-        const { image, ...rest } = turn;
+        const { image: _image, ...rest } = turn;
         return rest;
       });
       sessionWrite(SESSION_CHAT, lean);
@@ -299,11 +299,20 @@ export default function App() {
       audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); setIsTTSLoading(false); cleanupAudio(); };
       audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); setIsTTSLoading(false); cleanupAudio(); };
 
-      await audio.play();
+      try {
+        await audio.play();
+      } catch (playErr) {
+        if (playErr?.name === "AbortError") {
+          cleanupAudio();
+          return true; // Intentional interruption, do not trigger fallback voice
+        }
+        throw playErr;
+      }
       return true;
     } catch (e) {
       cleanupAudio();
       setIsSpeaking(false); setIsPaused(false); setIsTTSLoading(false);
+      if (e?.name === "AbortError") return true;
       console.warn("Edge TTS failed, falling back:", e.message);
       return false;
     }
@@ -570,18 +579,21 @@ export default function App() {
       const fN = formatNodes(update.nodes);
       const fE = formatEdges(update.edges);
       setNodes((prevNodes) => {
-        const ids = new Set(prevNodes.map((n) => n.id));
+        // Strip the initial welcome node as soon as real lesson nodes arrive
+        const baseNodes = fN.length > 0 ? prevNodes.filter((n) => n.id !== "start") : prevNodes;
+        const ids = new Set(baseNodes.map((n) => n.id));
         const toAdd = fN.filter((n) => !ids.has(n.id));
-        const mergedNodes = [...prevNodes, ...toAdd];
+        const mergedNodes = [...baseNodes, ...toAdd];
         setEdges((prevEdges) => {
-          const eIds = new Set(prevEdges.map((e) => e.id));
+          const baseEdges = prevEdges.filter((e) => e.source !== "start" && e.target !== "start");
+          const eIds = new Set(baseEdges.map((e) => e.id));
           const toAddE = fE.filter(
             (e) =>
               !eIds.has(e.id) &&
               mergedNodes.some((n) => n.id === e.source) &&
               mergedNodes.some((n) => n.id === e.target)
           );
-          const mergedEdges = [...prevEdges, ...toAddE];
+          const mergedEdges = [...baseEdges, ...toAddE];
           const laid = getLayoutedElements(mergedNodes, mergedEdges, "TB");
           setTimeout(() => {
             setNodes(laid.nodes); setEdges(laid.edges);
@@ -679,7 +691,7 @@ export default function App() {
     // Strip image dataUrl from previous turns to save tokens and payload size
     const cleanHistory = chatHistory.map(turn => {
       if (!turn.image) return turn;
-      const { image, ...rest } = turn;
+      const { image: _image, ...rest } = turn;
       return rest;
     });
 
@@ -779,7 +791,6 @@ export default function App() {
         const sw = src.measured?.width  || 172;
         const sh = src.measured?.height || 64;
         const tw = tgt.measured?.width  || 172;
-        const th = tgt.measured?.height || 64;
         // Bottom-centre of source → top-centre of target
         const x1 = (src.position.x + sw / 2) - minX;
         const y1 = (src.position.y + sh)      - minY;
@@ -787,10 +798,15 @@ export default function App() {
         const y2 = (tgt.position.y)            - minY;
         const cy = (y1 + y2) / 2;
         const path = `M${x1},${y1} C${x1},${cy} ${x2},${cy} ${x2},${y2}`;
-        const label = e.label
-          ? `<text x="${(x1 + x2) / 2}" y="${cy - 6}" text-anchor="middle" font-size="10" fill="#64748b" font-family="system-ui,sans-serif">${e.label}</text>`
+        const cleanEdgeLabel = (e.label || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+        const label = cleanEdgeLabel
+          ? `<text x="${(x1 + x2) / 2}" y="${cy - 6}" text-anchor="middle" font-size="10" fill="#64748b" font-family="system-ui,sans-serif">${cleanEdgeLabel}</text>`
           : "";
-        return `<path d="${path}" fill="none" stroke="#818cf8" stroke-width="2"/>${label}`;
+        return `<path d="${path}" fill="none" stroke="#818cf8" stroke-width="2" marker-end="url(#arrow)"/>${label}`;
       }).join("\n");
 
       // ── Node SVG ──────────────────────────────────────────────────────────
@@ -836,6 +852,11 @@ export default function App() {
       // ── Compose full SVG ──────────────────────────────────────────────────
       const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#818cf8"/>
+    </marker>
+  </defs>
   <rect width="100%" height="100%" fill="#f8fafc"/>
   <!-- Edges -->
   ${edgeSvg}
@@ -872,10 +893,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- Voice Input -----------------------------------------------------
-  const handleVoiceStart = useCallback((e) => {
+  // ---- Voice Input (tap-to-toggle with auto-append) ---------------------
+  const toggleVoice = useCallback((e) => {
     e.preventDefault();
     if (loading) return;
+    if (isListening) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       toast.error("Voice input not supported in this browser.");
@@ -887,8 +913,10 @@ export default function App() {
     
     recognition.onstart = () => setIsListening(true);
     recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setQuestion(transcript);
+      const transcript = event.results?.[0]?.[0]?.transcript || "";
+      if (transcript) {
+        setQuestion((prev) => (prev ? `${prev.trim()} ${transcript}` : transcript));
+      }
     };
     recognition.onerror = (event) => {
       console.error("Speech recognition error", event.error);
@@ -897,15 +925,12 @@ export default function App() {
     recognition.onend = () => setIsListening(false);
     
     recognitionRef.current = recognition;
-    recognition.start();
-  }, [loading]);
-
-  const handleVoiceStop = useCallback((e) => {
-    e.preventDefault();
-    if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop();
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
     }
-  }, [isListening]);
+  }, [loading, isListening]);
 
   const handleImageChange = useCallback((e) => {
     const file = e.target.files[0];
@@ -1000,7 +1025,7 @@ export default function App() {
     executeTutor({ studentQuestion: q, nodes, edges }, true);
   }, [executeTutor, nodes, edges]);
 
-  const handleQuizComplete = useCallback((passed, turnIdx) => {
+  const handleQuizComplete = useCallback((passed, _turnIdx) => {
     track("quiz_completed", { passed: !!passed });
     if (activeReviewId) {
       updateSRSItem(activeReviewId, passed);
@@ -1052,9 +1077,10 @@ export default function App() {
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
           nodeTypes={nodeTypes}
-          onNodeClick={(_, n) => setSelectedNodeId(n.id)}
-          onPaneClick={() => setSelectedNodeId(null)}
+          onNodeClick={onNodeClick}
+          onPaneClick={onPaneClick}
           onInit={(inst) => (reactFlowInstanceRef.current = inst)}
           fitView
           minZoom={0.2}
@@ -1327,12 +1353,10 @@ export default function App() {
                 {(window.SpeechRecognition || window.webkitSpeechRecognition) && (
                   <button
                     type="button"
-                    onPointerDown={handleVoiceStart}
-                    onPointerUp={handleVoiceStop}
-                    onPointerLeave={handleVoiceStop}
+                    onClick={toggleVoice}
                     disabled={loading}
-                    aria-label={isListening ? "Listening… release to stop" : "Hold to speak"}
-                    title="Hold to speak"
+                    aria-label={isListening ? "Listening… click to stop" : "Click to dictate"}
+                    title={isListening ? "Click to stop dictation" : "Click to dictate"}
                     className={`flex-none flex items-center justify-center w-12 rounded-xl border transition ${
                       isListening
                         ? "bg-red-500 border-red-600 text-white animate-pulse"

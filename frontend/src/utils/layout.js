@@ -7,7 +7,6 @@ import dagre from "dagre";
 export function getLayoutedElements(nodes, edges, direction = "TB") {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  const isHorizontal = direction === "LR";
   g.setGraph({
     rankdir: direction,
     nodesep: 90,
@@ -16,10 +15,19 @@ export function getLayoutedElements(nodes, edges, direction = "TB") {
     marginy: 40,
   });
 
-  // dagre needs width/height per node — align with CustomNode ~170x64
+  // dagre needs width/height per node — estimate dynamically if unmeasured
   nodes.forEach((node) => {
-    const w = node.measured?.width || 172;
-    const h = node.measured?.height || 64;
+    const label = node.data?.label || "";
+    const lineCount = Math.max(1, label.split("\n").length, Math.ceil(label.length / 22));
+    const shape = node.data?.shape || "rectangle";
+    let defaultW = 172;
+    let defaultH = Math.max(64, 40 + lineCount * 18);
+    if (shape === "circle") {
+      defaultW = 130;
+      defaultH = 130;
+    }
+    const w = node.measured?.width || defaultW;
+    const h = node.measured?.height || defaultH;
     g.setNode(node.id, { width: w, height: h });
   });
 
@@ -31,13 +39,23 @@ export function getLayoutedElements(nodes, edges, direction = "TB") {
 
   const layoutedNodes = nodes.map((node) => {
     const pos = g.node(node.id);
+    const label = node.data?.label || "";
+    const lineCount = Math.max(1, label.split("\n").length, Math.ceil(label.length / 22));
+    const shape = node.data?.shape || "rectangle";
+    let defaultW = 172;
+    let defaultH = Math.max(64, 40 + lineCount * 18);
+    if (shape === "circle") {
+      defaultW = 130;
+      defaultH = 130;
+    }
+    const w = node.measured?.width || defaultW;
+    const h = node.measured?.height || defaultH;
     return {
       ...node,
       position: {
-        x: pos.x - (node.measured?.width || 172) / 2,
-        y: pos.y - (node.measured?.height || 64) / 2,
+        x: pos.x - w / 2,
+        y: pos.y - h / 2,
       },
-      // preserve original data but ensure position is layout-derived
     };
   });
 

@@ -20,7 +20,7 @@ export function updateStreakOnLoad() {
     
     localStorage.setItem(STREAK_KEY, JSON.stringify({ streak: newStreak, lastDate: today }));
     return newStreak;
-  } catch (err) {
+  } catch {
     return 1;
   }
 }
@@ -45,7 +45,7 @@ export function saveSnapshot(title, nodes, edges, chatHistory) {
     // Strip large base64 images from chatHistory to prevent hitting 5MB localStorage limit
     const cleanHistory = chatHistory.map(turn => {
       if (!turn.image) return turn;
-      const { image, ...rest } = turn;
+      const { image: _image, ...rest } = turn;
       return rest;
     });
 

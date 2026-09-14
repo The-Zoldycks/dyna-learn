@@ -1,32 +1,55 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight, BarChart3 } from "lucide-react";
 import { getStreak, getSnapshots, getDueReviews, deleteSnapshot } from "../utils/storage";
 import { getStats } from "../utils/analytics";
 
 export default function JournalModal({ open, onClose, onLoadSnapshot, onStartReview }) {
-  const [streak, setStreak] = useState(0);
-  const [snapshots, setSnapshots] = useState([]);
-  const [dueReviews, setDueReviews] = useState([]);
+  const [streak] = useState(() => getStreak());
+  const [snapshots, setSnapshots] = useState(() => getSnapshots());
+  const [dueReviews] = useState(() => getDueReviews());
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-  const [stats, setStats] = useState(null);
+  const [stats] = useState(() => getStats());
+  const modalRef = useRef(null);
+  const previouslyFocusedRef = useRef(null);
 
   useEffect(() => {
-    if (open) {
-      setStreak(getStreak());
-      setSnapshots(getSnapshots());
-      setDueReviews(getDueReviews());
-      setConfirmDeleteId(null);
-      setStats(getStats());
+    previouslyFocusedRef.current = document.activeElement;
+    const focusable = modalRef.current?.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable?.length) {
+      focusable[0].focus();
     }
-  }, [open]);
 
-  useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === "Escape" && open) onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "Tab" && modalRef.current) {
+        const elements = modalRef.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (!elements.length) return;
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previouslyFocusedRef.current?.focus?.();
+    };
+  }, [onClose]);
 
   if (!open) return null;
 
@@ -36,6 +59,7 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
       onClick={onClose}
     >
       <div
+        ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-label="Learning journal"

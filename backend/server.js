@@ -42,20 +42,34 @@ const EDGE_VOICE_FALLBACK = [
   { id: "ko-KR-SunHiNeural", label: "SunHi — Young female (KR)", lang: "Korean", locale: "ko-KR" },
 ];
 
-// Middleware — allowlist (prod URLs hardcoded so a misconfigured FRONTEND_URL env can't lock out Vercel)
+// Middleware — allowlist (prod URLs + Vercel preview deploys + localhost)
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
+  'http://localhost:3000',
   'https://dyna-learn.vercel.app',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // Server-to-server, curl, or same-origin
+  if (allowedOrigins.includes(origin)) return true;
+  try {
+    const parsed = new URL(origin);
+    // Allow any Vercel deployment domain for dyna-learn
+    if (parsed.hostname === "dyna-learn.vercel.app" || parsed.hostname.endsWith(".vercel.app")) {
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(null, false);
     }
   }
 }));
@@ -437,6 +451,7 @@ app.get("/api/tts/voices", async (req, res) => {
 });
 
 app.post("/api/tts", async (req, res) => {
+  let tmpPath = null;
   try {
     const { text, voice = "en-US-AriaNeural", rate = "+0%", volume = "+0%", pitch = "+0Hz" } = req.body || {};
     if (!text || !text.trim()) return res.status(400).json({ error: "text required", code: "TTS_TEXT_REQUIRED" });
@@ -444,11 +459,10 @@ app.post("/api/tts", async (req, res) => {
     if (trimmed.length !== text.length) console.log(`[tts] truncated ${text.length} -> 5000 chars`);
     console.log(`[tts] synthesize voice=${voice} len=${trimmed.length}`);
     // node-edge-tts writes to file, so create temp file — use async read to avoid blocking event loop
-    const tmpPath = path.join(os.tmpdir(), `dyna-tts-${crypto.randomUUID()}.mp3`);
+    tmpPath = path.join(os.tmpdir(), `dyna-tts-${crypto.randomUUID()}.mp3`);
     const ttsEngine = new EdgeTTS({ voice, rate, volume, pitch });
     await ttsEngine.ttsPromise(trimmed, tmpPath);
     const audioBuffer = await fs.readFile(tmpPath);
-    await fs.unlink(tmpPath).catch(() => {});
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("X-TTS-Voice", voice);
@@ -460,6 +474,10 @@ app.post("/api/tts", async (req, res) => {
     let code = "TTS_ERROR";
     if (msg.includes("429") || msg.toLowerCase().includes("throttl")) code = "TTS_RATE_LIMIT";
     res.status(500).json({ error: "Edge TTS failed", details: msg.slice(0, 1000), code });
+  } finally {
+    if (tmpPath) {
+      await fs.unlink(tmpPath).catch(() => {});
+    }
   }
 });
 
