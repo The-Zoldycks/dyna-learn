@@ -26,9 +26,12 @@ before(async () => {
       PORT: String(PORT),
       GEMINI_API_KEY: "test-dummy-key",
       FRONTEND_URL: "http://localhost:5173",
+      NODE_ENV: "test",
     },
-    stdio: "ignore",
+    stdio: "pipe", // capture output for debugging
   });
+  child.stdout?.on("data", (d) => console.log("[server stdout]", d.toString()));
+  child.stderr?.on("data", (d) => console.error("[server stderr]", d.toString()));
   await waitForBoot();
 });
 
@@ -41,7 +44,8 @@ describe("health", () => {
     const res = await fetch(`${BASE}/`);
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.match(body.status, /Dyna-learn backend running/);
+    assert.equal(body.status, "ok");
+    assert.ok(typeof body.uptime === "number");
   });
 });
 

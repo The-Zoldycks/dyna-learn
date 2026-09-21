@@ -41,7 +41,7 @@ export default function QuizCard({ quiz, onComplete }) {
   };
 
   return (
-    <div className="mt-4 flex flex-col gap-4 border-t border-violet-200/50 pt-4" role="group" aria-label="Quiz questions">
+    <div className="mt-4 flex flex-col gap-4 border-t border-violet-200/50 pt-4" role="radiogroup" aria-label="Quiz questions">
       {validQuestions.map((q, qIdx) => {
         const hasAnswered = selectedAnswers[qIdx] !== undefined;
         const isCorrect = selectedAnswers[qIdx] === q.correct_index;
@@ -69,19 +69,27 @@ export default function QuizCard({ quiz, onComplete }) {
                 }
 
                 return (
-                  <button
+                  <div
                     key={optIdx}
-                    onClick={() => handleSelect(qIdx, optIdx)}
-                    disabled={hasAnswered}
-                    aria-pressed={isSelected}
+                    role="radio"
+                    aria-checked={isSelected}
                     aria-label={`Option ${String.fromCharCode(65 + optIdx)}: ${opt}${hasAnswered ? (isActuallyCorrect ? " (correct answer)" : isSelected ? " (your answer, incorrect)" : "") : ""}`}
-                    className={`text-left text-xs px-3 py-2 rounded-md border transition-colors ${btnStyle}`}
+                    className={`text-left text-xs px-3 py-2 rounded-md border transition-colors cursor-pointer ${btnStyle}`}
+                    onClick={() => handleSelect(qIdx, optIdx)}
+                    aria-disabled={hasAnswered}
+                    tabIndex={hasAnswered ? -1 : 0}
+                    onKeyDown={(e) => {
+                      if (!hasAnswered && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault();
+                        handleSelect(qIdx, optIdx);
+                      }
+                    }}
                   >
                     <div className="flex items-center gap-2">
                       <span className="shrink-0 font-mono text-[10px] opacity-50">{String.fromCharCode(65 + optIdx)}</span>
                       <span>{opt}</span>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

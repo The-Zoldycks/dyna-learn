@@ -14,7 +14,7 @@ import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
   MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search, Droplets, FolderKanban,
-  Target, Lightbulb, Sprout, AlertTriangle, Trophy, Dumbbell,
+  Target, Lightbulb, Sprout, AlertTriangle, Trophy, Dumbbell, MoreHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -31,6 +31,8 @@ const AuthModal = lazy(() => import("./components/AuthModal.jsx"));
 const SessionDrawer = lazy(() => import("./components/SessionDrawer.jsx"));
 import AdaptingIndicator from "./components/AdaptingIndicator.jsx";
 import { useAuth } from "./hooks/useAuth.js";
+import { useTTS } from "./hooks/useTTS.js";
+import { useImageAttachment } from "./hooks/useImageAttachment.js";
 import { useSessions } from "./hooks/useSessions.js";
 import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
@@ -108,21 +110,28 @@ export default function App() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(sessionRead(SESSION_EDGES, initialEdges));
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
-  const [isTTSLoading, setIsTTSLoading] = useState(false);
-  const [lastSpeech, setLastSpeech] = useState("");
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
+
+  // Unified speech (Edge Neural + browser fallback) — extracted hook
+  const {
+    browserVoices, edgeVoices, selectedVoice, setSelectedVoice,
+    playbackSpeed, cyclePlaybackSpeed,
+    autoNarrate, setAutoNarrate,
+    isTTSLoading, isSpeaking, isPaused, lastSpeech, setLastSpeech,
+    speakText,     pauseSpeech, resumeSpeech, stopSpeech, handleReplay,
+  } = useTTS(API_BASE);
+
+  // Image attachment (select / drag-drop / paste) — extracted hook
+  const {
+    selectedImage, clearImage,
+    isDraggingImage, fileInputRef,
+    handleImageChange, handleDragOver, handleDragLeave, handleDrop, handlePaste,
+  } = useImageAttachment({ loading });
 
   const [chatHistory, setChatHistory] = useState(() => sessionRead(SESSION_CHAT, []));
   const [selectedNodeId, setSelectedNodeId] = useState(null);
 
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [mobileTab, setMobileTab] = useState("chat"); // "chat" | "canvas"
-  const [browserVoices, setBrowserVoices] = useState([]);
-  const [edgeVoices, setEdgeVoices] = useState([]);
-  const [selectedVoice, setSelectedVoice] = useState(
-    () => localStorage.getItem("dyna-voice") || "en-US-AriaNeural"
-  );
   // Fluid cursor backdrop — default on for fine pointers unless reduced motion is preferred
   const [fluidOn, setFluidOn] = useState(() => {
     try {
@@ -141,20 +150,13 @@ export default function App() {
   const [practiceModalOpen, setPracticeModalOpen] = useState(false);
   const [practiceItems, setPracticeItems] = useState([]);
   const [activeReviewId, setActiveReviewId] = useState(null);
-  const [selectedImage, setSelectedImage] = useState(null);
-  const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [showMinimap, setShowMinimap] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(
-    () => parseFloat(localStorage.getItem("dyna-speech-speed")) || 1
-  );
-  const [autoNarrate, setAutoNarrate] = useState(
-    () => localStorage.getItem("dyna-auto-narrate") !== "false"
-  );
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   // Collapsible audio panels — collapsed by default so the tutor response area stays clean
   const [voiceOpen, setVoiceOpen] = useState(
     () => { try { return localStorage.getItem("dyna-voice-open") === "1"; } catch { return false; } }
@@ -174,11 +176,9 @@ export default function App() {
   } = useAuth();
 
   const recognitionRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const moreMenuRef = useRef(null);
 
   const lastPayloadRef = useRef(null);
-  const audioRef = useRef(null);
-  const audioUrlRef = useRef(null);
   const reactFlowInstanceRef = useRef(null); // imperative fitView
   const chatBottomRef = useRef(null);         // auto-scroll sentinel
 
@@ -282,6 +282,21 @@ export default function App() {
     };
   }, [setNodes, setEdges]);
 
+  // ---- Header "More" overflow menu: close on outside click / Escape ----
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) setMoreOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setMoreOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
+
   // ---- Connectivity detection (Rule 13 — Connectivity States) ----
   useEffect(() => {
     const goOffline = () => {
@@ -305,23 +320,7 @@ export default function App() {
     };
   }, []);
 
-  // ---- Voice lists + keyboard shortcut ----
-  useEffect(() => {
-    fetch(`${API_BASE}/api/tts/voices`)
-      .then((r) => r.json())
-      .then((data) => { if (data.voices?.length) setEdgeVoices(data.voices); })
-      .catch(() => {});
-
-    const loadVoices = () => {
-      const voices = window.speechSynthesis?.getVoices() || [];
-      if (voices.length) setBrowserVoices(voices);
-    };
-    loadVoices();
-    if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = loadVoices;
-  }, []);
-
-  // Persist selected voice
-  useEffect(() => { if (selectedVoice) localStorage.setItem("dyna-voice", selectedVoice); }, [selectedVoice]);
+  // Persist UI prefs (voice + speed owned by useTTS)
   useEffect(() => { try { localStorage.setItem("dyna-fluid", fluidOn ? "1" : "0"); } catch {} }, [fluidOn]);
   useEffect(() => { try { localStorage.setItem("dyna-voice-open", voiceOpen ? "1" : "0"); } catch {} }, [voiceOpen]);
   useEffect(() => { try { localStorage.setItem("dyna-player-open", playerOpen ? "1" : "0"); } catch {} }, [playerOpen]);
@@ -335,132 +334,7 @@ export default function App() {
     });
   };
 
-  const cleanupAudio = useCallback(() => {
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current.src = ""; audioRef.current = null; }
-    if (audioUrlRef.current) { URL.revokeObjectURL(audioUrlRef.current); audioUrlRef.current = null; }
-  }, []);
-
-  useEffect(() => () => { cleanupAudio(); window.speechSynthesis?.cancel(); }, [cleanupAudio]);
-
-  // ---- TTS: browser fallback ----
-  const speakBrowser = useCallback((text) => {
-    if (!text || typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    cleanupAudio();
-    const utterance = new SpeechSynthesisUtterance(text);
-    const bv = browserVoices.find((v) => v.name === selectedVoice || v.voiceURI === selectedVoice);
-    if (bv) utterance.voice = bv;
-    utterance.rate = playbackSpeed; utterance.pitch = 1; utterance.volume = 1;
-    utterance.lang = bv?.lang || "en-US";
-    utterance.onstart  = () => { setIsSpeaking(true); setIsPaused(false); };
-    utterance.onend    = () => { setIsSpeaking(false); setIsPaused(false); };
-    utterance.onerror  = () => { setIsSpeaking(false); setIsPaused(false); };
-    utterance.onpause  = () => setIsPaused(true);
-    utterance.onresume = () => setIsPaused(false);
-    window.speechSynthesis.speak(utterance);
-  }, [browserVoices, selectedVoice, playbackSpeed, cleanupAudio]);
-
-  // ---- TTS: Edge Neural ----
-  const speakEdge = useCallback(async (text) => {
-    try {
-      cleanupAudio();
-      window.speechSynthesis?.cancel();
-      setIsTTSLoading(true); setIsSpeaking(false); setIsPaused(false);
-
-      const res = await fetch(`${API_BASE}/api/tts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.slice(0, 5000), voice: selectedVoice }),
-      });
-      if (!res.ok) throw new Error(`Edge TTS ${res.status}`);
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      audioUrlRef.current = url;
-      const audio = new Audio(url);
-      audio.playbackRate = playbackSpeed;
-      audioRef.current = audio;
-
-      audio.onplay   = () => { setIsTTSLoading(false); setIsSpeaking(true); setIsPaused(false); };
-      audio.onpause  = () => { if (!audio.ended) setIsPaused(true); };
-      audio.onended  = () => { setIsSpeaking(false); setIsPaused(false); setIsTTSLoading(false); cleanupAudio(); };
-      audio.onerror  = () => { setIsSpeaking(false); setIsPaused(false); setIsTTSLoading(false); cleanupAudio(); };
-
-      try {
-        await audio.play();
-      } catch (playErr) {
-        if (playErr?.name === "AbortError") {
-          cleanupAudio();
-          return true; // Intentional interruption, do not trigger fallback voice
-        }
-        throw playErr;
-      }
-      return true;
-    } catch (e) {
-      cleanupAudio();
-      setIsSpeaking(false); setIsPaused(false); setIsTTSLoading(false);
-      if (e?.name === "AbortError") return true;
-      console.warn("Edge TTS failed, falling back:", e.message);
-      return false;
-    }
-  }, [selectedVoice, playbackSpeed, cleanupAudio]);
-
-  const cyclePlaybackSpeed = useCallback(() => {
-    const speeds = [1, 1.25, 1.5, 2];
-    setPlaybackSpeed((prev) => {
-      const nextIndex = (speeds.indexOf(prev) + 1) % speeds.length;
-      const next = speeds[nextIndex !== -1 ? nextIndex : 0];
-      localStorage.setItem("dyna-speech-speed", String(next));
-      if (audioRef.current) audioRef.current.playbackRate = next;
-      return next;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackSpeed;
-    }
-  }, [playbackSpeed]);
-
-  // ---- Stable isEdgeVoice ----
-  const isEdgeVoice = useCallback(
-    (voice) => voice.includes("Neural") || edgeVoices.some((v) => v.id === voice),
-    [edgeVoices]
-  );
-
-  // ---- Unified speak ----
-  const speakText = useCallback(async (text) => {
-    if (!text) return;
-    setLastSpeech(text);
-    if (isEdgeVoice(selectedVoice)) {
-      const ok = await speakEdge(text);
-      if (ok) return;
-      toast.info("Falling back to browser voice", {
-        duration: 2500,
-        description: "Edge neural unavailable — using offline voice.",
-      });
-    }
-    speakBrowser(text);
-  }, [selectedVoice, isEdgeVoice, speakEdge, speakBrowser]);
-
-  const pauseSpeech = useCallback(() => {
-    if (audioRef.current && !audioRef.current.paused) { audioRef.current.pause(); setIsPaused(true); return; }
-    if (window.speechSynthesis?.speaking && !isPaused) { window.speechSynthesis.pause(); setIsPaused(true); }
-  }, [isPaused]);
-
-  const resumeSpeech = useCallback(() => {
-    if (audioRef.current?.paused) {
-      audioRef.current.play().then(() => setIsPaused(false)).catch(() => setIsPaused(false));
-      return;
-    }
-    if (isPaused) { window.speechSynthesis.resume(); setIsPaused(false); }
-  }, [isPaused]);
-
-  const stopSpeech = useCallback(() => {
-    cleanupAudio();
-    window.speechSynthesis?.cancel();
-    setIsSpeaking(false); setIsPaused(false); setIsTTSLoading(false);
-  }, [cleanupAudio]);
+  // ---- Speech controls come from useTTS (speakText, pauseSpeech, resumeSpeech, stopSpeech, cleanupAudio) ----
 
   // ---- Imperative fitView via React Flow instance ----
   const triggerFitView = useCallback((nodeIds = null) => {
@@ -777,13 +651,13 @@ export default function App() {
         setChatHistory((prev) => {
           const next = [
             ...prev,
-            { role: "user", text: payload.studentQuestion, image: payload.image?.dataUrl || null },
+            { role: "user", text: payload.studentQuestion, image: payload.image?.previewUrl || null },
             { role: "model", text: speech_text || "", quiz: quiz || null }
           ];
           return next.slice(-6);
         });
       } else {
-        setChatHistory((prev) => [...prev, { role: "user", text: payload.studentQuestion, image: payload.image?.dataUrl || null }].slice(-6));
+        setChatHistory((prev) => [...prev, { role: "user", text: payload.studentQuestion, image: payload.image?.previewUrl || null }].slice(-6));
       }
 
       if (diagram_update && diagram_update.action !== "quiz") {
@@ -818,7 +692,7 @@ export default function App() {
       });
       return false;
     } finally { setLoading(false); }
-  }, [speakText, applyDiagramUpdateStable, autoNarrate, triggerIdleAutoSave]);
+  }, [speakText, setLastSpeech, applyDiagramUpdateStable, autoNarrate, triggerIdleAutoSave]);
 
   // ---- Form submit ----
   const handleSubmit = async (e) => {
@@ -843,27 +717,23 @@ export default function App() {
       flowchartState: canvasState, // legacy compat
       chatHistory: cleanHistory,
       selectedNodeId,
-      image: selectedImage ? { base64: selectedImage.base64, mimeType: selectedImage.mimeType, dataUrl: selectedImage.dataUrl } : null,
+      image: selectedImage ? { base64: selectedImage.base64, mimeType: selectedImage.mimeType } : null,
     };
     const ok = await executeTutor(payload);
     if (ok) {
       setQuestion("");
-      setSelectedImage(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      clearImage();
     }
   };
 
   const handleClear = () => {
+    clearImage();
     setNodes(initialNodes); setEdges(initialEdges); setChatHistory([]); setSelectedNodeId(null);
     stopSpeech(); setLastSpeech("");
     setExpandedIds(new Set()); lastPayloadRef.current = null;
-    setSelectedImage(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
     sessionClear(); // also wipe sessionStorage
     toast.success("Canvas cleared", { duration: 3000, description: "Welcome node restored — ask a new question" });
   };
-
-  const handleReplay = () => { if (lastSpeech) speakText(lastSpeech); };
 
   const renderDiagramPng = useCallback(async () => {
     const instance = reactFlowInstanceRef.current;
@@ -981,77 +851,7 @@ export default function App() {
     }
   }, [loading, isListening]);
 
-  const processImageFile = useCallback((file) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file (PNG, JPG, WebP, etc.).");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Image must be under 5MB for the Gemini API.");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result;
-      const base64 = result.split(",")[1];
-      setSelectedImage({
-        dataUrl: result,
-        base64: base64,
-        mimeType: file.type,
-      });
-      toast.success("Image attached! Ask a question or press send.");
-    };
-    reader.onerror = () => {
-      toast.error("Failed to read image file.");
-    };
-    reader.readAsDataURL(file);
-    // Reset file input so same file can be selected again if needed
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, []);
-
-  const handleImageChange = useCallback((e) => {
-    const file = e.target.files?.[0];
-    if (file) processImageFile(file);
-  }, [processImageFile]);
-
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!loading && !isDraggingImage) setIsDraggingImage(true);
-  }, [loading, isDraggingImage]);
-
-  const handleDragLeave = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!e.currentTarget.contains(e.relatedTarget)) {
-      setIsDraggingImage(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingImage(false);
-    if (loading) return;
-    const file = e.dataTransfer?.files?.[0];
-    if (file) processImageFile(file);
-  }, [loading, processImageFile]);
-
-  const handlePaste = useCallback((e) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith("image/")) {
-        const file = items[i].getAsFile();
-        if (file) {
-          e.preventDefault();
-          processImageFile(file);
-          break;
-        }
-      }
-    }
-  }, [processImageFile]);
+  // ---- Image attachment handlers come from useImageAttachment ----
 
   const handleShare = useCallback(async () => {
     if (nodes.length <= 1) return;
@@ -1215,7 +1015,7 @@ export default function App() {
       )}
       
       {/* ── Background Canvas (z-0) ── */}
-      <div className={`absolute inset-0 z-0 transition-opacity ${mobileTab === "chat" ? "opacity-0 pointer-events-none sm:opacity-100 sm:pointer-events-auto" : "opacity-100"}`}>
+      <div id="canvas-panel" className={`absolute inset-0 z-0 transition-opacity ${mobileTab === "chat" ? "opacity-0 pointer-events-none sm:opacity-100 sm:pointer-events-auto" : "opacity-100"}`}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -1325,7 +1125,8 @@ export default function App() {
       </div>
 
       {/* ── Floating Top Actions (Top Right) ── */}
-      <header className="absolute top-4 right-4 sm:top-5 sm:right-5 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-xl px-2 py-2 rounded-2xl shadow-sm border border-slate-200/60">
+      <header className="absolute top-4 right-4 sm:top-5 sm:right-5 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-xl px-2 py-2 rounded-2xl shadow-sm border border-slate-200/60 max-w-[calc(100vw-2rem)]">
+        <div className="hidden sm:flex items-center gap-2">
         <button
           onClick={() => setSessionDrawerOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
@@ -1348,6 +1149,7 @@ export default function App() {
           <BookOpen size={14} className="text-violet-600" />
           <span className="hidden sm:inline">Journal</span>
         </button>
+        </div>
         <button
           onClick={handleSaveWorkspace}
           disabled={nodes.length <= 1 || isSaving}
@@ -1356,6 +1158,7 @@ export default function App() {
           {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           <span className="hidden sm:inline">{isSaving ? "Saving…" : "Save"}</span>
         </button>
+        <div className="hidden sm:flex items-center gap-2">
         <button
           onClick={() => setFluidOn((v) => !v)}
           className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition border ${
@@ -1375,6 +1178,38 @@ export default function App() {
         >
           <Trash2 size={14} /> <span className="hidden md:inline">Clear</span>
         </button>
+        </div>
+        {/* Mobile overflow menu */}
+        <div className="relative sm:hidden" ref={moreMenuRef}>
+          <button
+            onClick={() => setMoreOpen((v) => !v)}
+            aria-expanded={moreOpen}
+            aria-haspopup="menu"
+            aria-label="More actions"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-white/90 border border-transparent transition min-h-[44px]"
+          >
+            <MoreHorizontal size={16} className="text-violet-600" />
+          </button>
+          {moreOpen && (
+            <div role="menu" aria-label="More actions" className="absolute right-0 mt-2 w-52 rounded-2xl bg-white border border-slate-200 shadow-xl py-1.5 z-50">
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setSessionDrawerOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
+                <FolderKanban size={14} className="text-violet-600" /> Sessions
+              </button>
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setTopicExplorerOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
+                <Compass size={14} className="text-violet-600" /> Topics
+              </button>
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setJournalOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
+                <BookOpen size={14} className="text-violet-600" /> Journal
+              </button>
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setFluidOn((v) => !v); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
+                <Droplets size={14} className="text-violet-600" /> {fluidOn ? "Backdrop off" : "Backdrop on"}
+              </button>
+              <button role="menuitem" onClick={() => { setMoreOpen(false); handleClear(); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
+                <Trash2 size={14} className="text-violet-600" /> Clear canvas
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* User Account Menu / Sign In */}
         <UserMenu
@@ -1388,7 +1223,7 @@ export default function App() {
       </header>
 
       {/* ── Left panel: Chat Sidebar (Floating on Desktop, Full on Mobile) ── */}
-      <div className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col bg-white/95 backdrop-blur-2xl sm:rounded-[2rem] shadow-2xl border-r sm:border border-slate-200/60 overflow-hidden transition-transform duration-300 ease-out pb-[60px] sm:pb-0 ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
+      <div id="chat-panel" className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col bg-white/95 backdrop-blur-2xl sm:rounded-[2rem] shadow-2xl border-r sm:border border-slate-200/60 overflow-hidden transition-transform duration-300 ease-out pb-[calc(60px+env(safe-area-inset-bottom))] sm:pb-0 ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
 
           {/* Panel header */}
           <div className="p-4 border-b border-slate-100 shrink-0">
@@ -1547,11 +1382,7 @@ export default function App() {
                   <input
                     type="checkbox"
                     checked={autoNarrate}
-                    onChange={(e) => {
-                      const val = e.target.checked;
-                      setAutoNarrate(val);
-                      localStorage.setItem("dyna-auto-narrate", String(val));
-                    }}
+                    onChange={(e) => setAutoNarrate(e.target.checked)}
                     className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
                   />
                   <span className="text-[11px] font-medium text-slate-600">Auto-narrate</span>
@@ -1710,10 +1541,10 @@ export default function App() {
 
               {selectedImage && (
                 <div className="relative inline-block w-fit mb-[-4px]">
-                  <img src={selectedImage.dataUrl} alt="Upload preview" className="h-16 w-auto rounded-md border border-slate-200 shadow-sm" />
+                  <img src={selectedImage.previewUrl} alt="Upload preview" className="h-16 w-auto rounded-md border border-slate-200 shadow-sm" />
                   <button
                     type="button"
-                    onClick={() => setSelectedImage(null)}
+                    onClick={() => clearImage()}
                     aria-label="Remove attached image"
                     className="absolute -top-2 -right-2 bg-white rounded-full text-slate-500 hover:text-red-600 transition"
                   >
@@ -1784,7 +1615,7 @@ export default function App() {
                   type="submit"
                   disabled={loading || isOffline || (!question.trim() && !selectedImage)}
                   aria-label={loading ? "Adapting diagram" : "Send your question to the tutor"}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white font-medium text-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md"
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md"
                 >
                   {loading
                     ? <><Loader2 size={16} className="animate-spin" aria-hidden="true" /> Thinking…</>
@@ -1855,27 +1686,31 @@ export default function App() {
             )}
           </div>
         </div>
-      <div className="sm:hidden absolute bottom-0 left-0 right-0 z-30 flex bg-white/90 backdrop-blur-md border-t border-slate-200/60 shadow-[0_-4px_24px_rgba(0,0,0,0.05)]">
+      <div className="sm:hidden absolute bottom-0 left-0 right-0 z-30 flex bg-white/90 backdrop-blur-md border-t border-slate-200/60 shadow-[0_-4px_24px_rgba(0,0,0,0.05)] pb-[env(safe-area-inset-bottom)]" role="tablist" aria-label="Main navigation">
         <button
+          role="tab"
+          aria-selected={mobileTab === "chat"}
+          aria-controls="chat-panel"
           onClick={() => setMobileTab("chat")}
-          className={`flex-1 flex flex-col items-center py-2.5 text-[11px] font-medium transition ${
+          className={`flex-1 flex flex-col items-center py-3.5 min-h-[44px] text-[11px] font-medium transition ${
             mobileTab === "chat"
               ? "text-violet-600 border-t-2 border-violet-600 -mt-px bg-violet-50/50"
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
           }`}
-          aria-label="Chat panel"
         >
           <MessageSquare size={18} className="mb-0.5" />
           Chat
         </button>
         <button
+          role="tab"
+          aria-selected={mobileTab === "canvas"}
+          aria-controls="canvas-panel"
           onClick={() => setMobileTab("canvas")}
-          className={`flex-1 flex flex-col items-center py-2.5 text-[11px] font-medium transition ${
+          className={`flex-1 flex flex-col items-center py-3.5 min-h-[44px] text-[11px] font-medium transition ${
             mobileTab === "canvas"
               ? "text-violet-600 border-t-2 border-violet-600 -mt-px bg-violet-50/50"
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
           }`}
-          aria-label="Canvas panel"
         >
           <Network size={18} className="mb-0.5" />
           Canvas

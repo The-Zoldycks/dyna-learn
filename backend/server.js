@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import rateLimit from "express-rate-limit";
+import helmet from "helmet";
+import hpp from "hpp";
 import { GoogleGenAI } from "@google/genai";
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
@@ -12,6 +14,12 @@ const require = createRequire(import.meta.url);
 const { EdgeTTS } = require("node-edge-tts");
 
 dotenv.config();
+
+// Startup validation — fail fast if required secrets missing
+if (!process.env.GEMINI_API_KEY) {
+  console.error("FATAL: GEMINI_API_KEY not set. Set it in environment or backend/.env");
+  process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,19 +36,15 @@ const FALLBACK_MODELS = [
 ];
 // Last known-good model — tried first to skip the fallback chain on warm paths
 let workingModel = null;
+let workingModelExpiresAt = 0;
 
-// TTS — self-hosted edge-tts (Toolbox parity, no external fetch, no cold start)
-const EDGE_VOICE_FALLBACK = [
-  { id: "en-US-AriaNeural", label: "Aria — Warm female (US)", lang: "English", locale: "en-US" },
-  { id: "en-US-JennyNeural", label: "Jenny — Friendly female (US)", lang: "English", locale: "en-US" },
-  { id: "en-US-GuyNeural", label: "Guy — Mature male (US)", lang: "English", locale: "en-US" },
-  { id: "en-GB-SoniaNeural", label: "Sonia — Bright female (UK)", lang: "English", locale: "en-GB" },
-  { id: "en-GB-RyanNeural", label: "Ryan — Youthful male (UK)", lang: "English", locale: "en-GB" },
-  { id: "zh-CN-XiaoxiaoNeural", label: "Xiaoxiao — Young female (CN)", lang: "Chinese", locale: "zh-CN" },
-  { id: "zh-CN-YunxiNeural", label: "Yunxi — Young male (CN)", lang: "Chinese", locale: "zh-CN" },
-  { id: "ja-JP-NanamiNeural", label: "Nanami — Young female (JP)", lang: "Japanese", locale: "ja-JP" },
-  { id: "ko-KR-SunHiNeural", label: "SunHi — Young female (KR)", lang: "Korean", locale: "ko-KR" },
-];
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: false, // we serve inline styles via Vite in dev
+  crossOriginEmbedderPolicy: false,
+}));
+app.use(hpp()); // Prevent HTTP Parameter Pollution
+app.disable('x-powered-by');
 
 // Middleware — allowlist (prod URLs + Vercel preview deploys + localhost)
 const allowedOrigins = [
@@ -51,13 +55,15 @@ const allowedOrigins = [
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
+// Vercel preview regex: dyna-learn-<hash>.vercel.app
+const VERCEL_PREVIEW_REGEX = /^https:\/\/dyna-learn-[a-z0-9-]+\.vercel\.app$/;
+
 function isAllowedOrigin(origin) {
   if (!origin) return true; // Server-to-server, curl, or same-origin
   if (allowedOrigins.includes(origin)) return true;
   try {
     const parsed = new URL(origin);
-    // Allow any Vercel deployment domain for dyna-learn
-    if (parsed.hostname === "dyna-learn.vercel.app" || parsed.hostname.endsWith(".vercel.app")) {
+    if (parsed.hostname === "dyna-learn.vercel.app" || VERCEL_PREVIEW_REGEX.test(origin)) {
       return true;
     }
   } catch {}
@@ -69,11 +75,16 @@ app.use(cors({
     if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
-      callback(null, false);
+      callback(new Error('CORS not allowed'), false);
     }
-  }
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false,
+  maxAge: 86400,
 }));
-app.use(express.json({ limit: '10mb' }));
+
+app.use(express.json({ limit: '2mb' }));
 
 // Behind Render's proxy — without this, express-rate-limit counts the proxy IP as one user
 app.set('trust proxy', 1);
@@ -103,7 +114,11 @@ const ai = new GoogleGenAI({
 
 // Health check
 app.get("/", (req, res) => {
-  res.json({ status: "Dyna-learn backend running", port: PORT });
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
+app.get("/healthz", (req, res) => {
+  res.json({ status: "ok", uptime: process.uptime() });
 });
 
 // POST /api/tutor - Interactive AI Tutor endpoint with lifecycle alignment
@@ -411,9 +426,10 @@ Rules:
     else if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.toLowerCase().includes("high demand")) code = "GEMINI_UNAVAILABLE";
     else if (msg.includes("404") || msg.includes("NOT_FOUND")) code = "GEMINI_MODEL_NOT_FOUND";
     else if (msg.includes("401") || msg.includes("API key")) code = "GEMINI_AUTH_ERROR";
+    const isProd = process.env.NODE_ENV === "production";
     res.status(code === "GEMINI_RATE_LIMIT" ? 429 : 500).json({
       error: "Failed to generate tutor response",
-      details: msg,
+      ...(isProd ? {} : { details: msg.slice(0, 500) }),
       code,
     });
   }
@@ -455,13 +471,36 @@ app.post("/api/tts", async (req, res) => {
   try {
     const { text, voice = "en-US-AriaNeural", rate = "+0%", volume = "+0%", pitch = "+0Hz" } = req.body || {};
     if (!text || !text.trim()) return res.status(400).json({ error: "text required", code: "TTS_TEXT_REQUIRED" });
+    
+    // Validate voice format: en-US-AriaNeural pattern
+    const VOICE_RE = /^[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural$/;
+    if (!VOICE_RE.test(voice)) return res.status(400).json({ error: "invalid voice", code: "TTS_VOICE_INVALID" });
+    
+    // Validate rate: +0% to +100%, -50% to +0%
+    const RATE_RE = /^[+-](\d{1,3})%$/;
+    if (!RATE_RE.test(rate)) return res.status(400).json({ error: "invalid rate format (e.g. +10%, -20%)", code: "TTS_RATE_INVALID" });
+    const rateVal = parseInt(rate.slice(0, -1), 10);
+    if (rateVal > 100 || rateVal < -50) return res.status(400).json({ error: "rate out of range [-50%, +100%]", code: "TTS_RATE_INVALID" });
+    
+    // Validate volume: similar pattern
+    const VOLUME_RE = /^[+-]\d{1,3}%$/;
+    if (!VOLUME_RE.test(volume)) return res.status(400).json({ error: "invalid volume format", code: "TTS_VOLUME_INVALID" });
+    
+    // Validate pitch: +0Hz, +5Hz, -5Hz
+    const PITCH_RE = /^[+-]\d+Hz$/;
+    if (!PITCH_RE.test(pitch)) return res.status(400).json({ error: "invalid pitch format (e.g. +5Hz)", code: "TTS_PITCH_INVALID" });
+    
     const trimmed = text.slice(0, 5000);
     if (trimmed.length !== text.length) console.log(`[tts] truncated ${text.length} -> 5000 chars`);
-    console.log(`[tts] synthesize voice=${voice} len=${trimmed.length}`);
+    console.log(`[tts] synthesize voice=${voice} rate=${rate} volume=${volume} pitch=${pitch} len=${trimmed.length}`);
     // node-edge-tts writes to file, so create temp file — use async read to avoid blocking event loop
     tmpPath = path.join(os.tmpdir(), `dyna-tts-${crypto.randomUUID()}.mp3`);
     const ttsEngine = new EdgeTTS({ voice, rate, volume, pitch });
-    await ttsEngine.ttsPromise(trimmed, tmpPath);
+    // 15s timeout on synthesis
+    await Promise.race([
+      ttsEngine.ttsPromise(trimmed, tmpPath),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("TTS timeout")), 15000)),
+    ]);
     const audioBuffer = await fs.readFile(tmpPath);
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "private, max-age=3600");
@@ -473,7 +512,8 @@ app.post("/api/tts", async (req, res) => {
     const msg = err.message || String(err);
     let code = "TTS_ERROR";
     if (msg.includes("429") || msg.toLowerCase().includes("throttl")) code = "TTS_RATE_LIMIT";
-    res.status(500).json({ error: "Edge TTS failed", details: msg.slice(0, 1000), code });
+    const isProd = process.env.NODE_ENV === "production";
+    res.status(500).json({ error: "Edge TTS failed", ...(isProd ? {} : { details: msg.slice(0, 1000) }), code });
   } finally {
     if (tmpPath) {
       await fs.unlink(tmpPath).catch(() => {});
@@ -481,7 +521,27 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`Dyna-learn backend running on http://0.0.0.0:${PORT}`);
   console.log(`TTS mode: edge-tts self-hosted (in-process, no fetch, same as Toolbox-backend)`);
+});
+
+// Graceful shutdown — Render sends SIGTERM, 30s grace
+function shutdown(signal) {
+  console.log(`${signal} received, closing HTTP server...`);
+  server.close(() => {
+    console.log("HTTP server closed");
+    process.exit(0);
+  });
+  // Force close after 25s (leaving 5s buffer for Render's 30s limit)
+  setTimeout(() => {
+    console.error("Forced shutdown after timeout");
+    process.exit(1);
+  }, 25000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection:", reason);
 });

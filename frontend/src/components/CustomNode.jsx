@@ -54,16 +54,7 @@ export default function CustomNode({ id, data, selected }) {
 
   return (
     <div
-      tabIndex={0}
-      role="button"
-      aria-label={`${data.label}${isHighlighted ? " (highlighted for review)" : ""}`}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          window.dispatchEvent(new CustomEvent('ask-node', { detail: data.label }));
-        }
-      }}
-      className={`${base} ${variants[shape] || variants.rectangle} ${stateStyle} focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2`}
+      className={`${base} ${variants[shape] || variants.rectangle} ${stateStyle} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2`}
       style={diamondStyle}
       title={isHighlighted ? "Highlighted — student confusion detected. Review this concept." : undefined}
     >

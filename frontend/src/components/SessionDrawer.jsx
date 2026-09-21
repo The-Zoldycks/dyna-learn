@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Plus, Search, Trash2, Edit2, Check, Clock, AlertTriangle, ArrowRight, FolderOpen } from "lucide-react";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
@@ -56,7 +56,7 @@ export default function SessionDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="session-drawer-title"
-        className="bg-white w-full sm:max-w-lg h-full sm:h-auto sm:max-h-[85vh] sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 animate-in fade-in slide-in-from-right-10 sm:zoom-in-95 duration-200"
+        className="bg-white w-full sm:max-w-lg h-full sm:h-auto sm:max-h-[85vh] sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 animate-in fade-in slide-in-from-right-10 sm:zoom-in-95 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

@@ -15,14 +15,24 @@ body {
   overflow: hidden;
 }
 
-/* Respect users who prefer reduced motion */
+/* Respect users who prefer reduced motion — scope to animated elements, not * */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  .animate-pulse,
+  .animate-spin,
+  .animate-bounce,
+  .mahoraga-wheel,
+  [style*="animation"],
+  [style*="transition"] {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Prevent iOS auto-zoom on focus: inputs must be >=16px on small screens */
+@media (max-width: 640px) {
+  input, textarea, select {
+    font-size: 16px;
   }
 }
 

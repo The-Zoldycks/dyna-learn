@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight, BarChart3, Search, RotateCw } from "lucide-react";
 import { getStreak, getSnapshots, getDueReviews, deleteSnapshot } from "../utils/storage";
 import { getStats } from "../utils/analytics";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 export default function JournalModal({ open, onClose, onLoadSnapshot, onStartReview, onPracticeCards }) {
   const [streak] = useState(() => getStreak());
@@ -11,52 +12,12 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
   const [stats] = useState(() => getStats());
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("all");
-  const modalRef = useRef(null);
-  const previouslyFocusedRef = useRef(null);
+  const modalRef = useFocusTrap(open);
 
   const query = searchQuery.trim().toLowerCase();
   const filteredSnapshots = snapshots.filter((s) => !query || s.title?.toLowerCase().includes(query));
   const filteredReviews = dueReviews.filter((r) => !query || r.label?.toLowerCase().includes(query));
   const hasNoResults = query && filteredSnapshots.length === 0 && filteredReviews.length === 0;
-
-  useEffect(() => {
-    previouslyFocusedRef.current = document.activeElement;
-    const focusable = modalRef.current?.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    if (focusable?.length) {
-      focusable[0].focus();
-    }
-
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (e.key === "Tab" && modalRef.current) {
-        const elements = modalRef.current.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        if (!elements.length) return;
-        const first = elements[0];
-        const last = elements[elements.length - 1];
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      previouslyFocusedRef.current?.focus?.();
-    };
-  }, [onClose]);
 
   if (!open) return null;
 

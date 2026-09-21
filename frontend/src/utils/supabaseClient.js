@@ -340,7 +340,7 @@ export const auth = {
 
 // ── Database Query Builder (PostgREST) ──────────────────────────────────────
 class QueryBuilder {
-  constructor(table) {
+constructor(table) {
     this.table = table;
     this.url = `${SUPABASE_URL}/rest/v1/${table}`;
     this.queryParams = new URLSearchParams();
@@ -351,7 +351,8 @@ class QueryBuilder {
     };
     this.body = null;
     this.isSingle = false;
-    this.returning = false; // for insert with select=id
+    this.returning = false;
+    this._promise = null; // memoized execute promise
 
     const session = getStoredSession();
     if (session?.access_token) {
@@ -360,12 +361,14 @@ class QueryBuilder {
   }
 
   select(columns = "*") {
+    this._promise = null; // invalidate memo on query change
     this.method = "GET";
     this.queryParams.set("select", columns);
     return this;
   }
 
   insert(data) {
+    this._promise = null;
     this.method = "POST";
     this.headers.Prefer = "return=representation";
     this.body = JSON.stringify(data);
@@ -374,6 +377,7 @@ class QueryBuilder {
   }
 
   update(data) {
+    this._promise = null;
     this.method = "PATCH";
     this.headers.Prefer = "return=representation";
     this.body = JSON.stringify(data);
@@ -381,22 +385,26 @@ class QueryBuilder {
   }
 
   delete() {
+    this._promise = null;
     this.method = "DELETE";
     this.headers.Prefer = "return=representation";
     return this;
   }
 
   eq(column, value) {
+    this._promise = null;
     this.queryParams.set(column, `eq.${value}`);
     return this;
   }
 
   order(column, { ascending = true } = {}) {
+    this._promise = null;
     this.queryParams.set("order", `${column}.${ascending ? "asc" : "desc"}`);
     return this;
   }
 
   limit(count) {
+    this._promise = null;
     this.queryParams.set("limit", String(count));
     return this;
   }
@@ -406,17 +414,24 @@ class QueryBuilder {
     return this;
   }
 
-  // Proper Promise interface
+  // Proper Promise interface — memoized so chaining doesn't re-fetch
   then(onFulfilled, onRejected) {
-    return this.execute().then(onFulfilled, onRejected);
+    return this._getPromise().then(onFulfilled, onRejected);
   }
 
   catch(onRejected) {
-    return this.execute().catch(onRejected);
+    return this._getPromise().catch(onRejected);
   }
 
   finally(onFinally) {
-    return this.execute().finally(onFinally);
+    return this._getPromise().finally(onFinally);
+  }
+
+  _getPromise() {
+    if (!this._promise) {
+      this._promise = this.execute();
+    }
+    return this._promise;
   }
 
   async execute() {

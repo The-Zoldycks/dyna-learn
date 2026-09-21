@@ -102,7 +102,7 @@ export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWit
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="relative px-6 pt-6 pb-4 border-b border-slate-100 bg-gradient-to-br from-violet-50/60 to-indigo-50/30">
+        <div className="relative px-6 pt-6 pb-4 border-b border-slate-100 bg-violet-50/60">
           <button
             onClick={onClose}
             aria-label="Close dialog"

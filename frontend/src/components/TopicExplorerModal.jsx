@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo } from "react";
 import { Compass, X, Search, ArrowRight, BookOpen, Layers, Shield, Network, Brain } from "lucide-react";
 import { TOPIC_STARTERS } from "../data/topics.js";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 const CATEGORY_ICONS = {
   "Computer Science": BookOpen,
@@ -13,42 +14,7 @@ const CATEGORY_ICONS = {
 export default function TopicExplorerModal({ open, onClose, onSelectTopic }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
-  const modalRef = useRef(null);
-  const previouslyFocusedRef = useRef(null);
-
-  // Focus trapping and Esc handling
-  useEffect(() => {
-    if (!open) return;
-    previouslyFocusedRef.current = document.activeElement;
-
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (e.key === "Tab" && modalRef.current) {
-        const focusable = modalRef.current.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        if (!focusable.length) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      previouslyFocusedRef.current?.focus();
-    };
-  }, [open, onClose]);
+  const modalRef = useFocusTrap(open);
 
   const categories = useMemo(() => {
     const cats = new Set(TOPIC_STARTERS.map((t) => t.category));
