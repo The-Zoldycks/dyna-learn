@@ -44,7 +44,14 @@ export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWit
       }
       onClose();
     } catch (err) {
-      setErrorMsg(err.message || "Authentication failed. Please check your credentials.");
+      const msg = err.message || "";
+      if (msg.includes("Invalid login credentials")) {
+        setErrorMsg("Invalid email or password. If you haven't created an account yet, click 'Create one free' below.");
+      } else if (msg.includes("Email not confirmed")) {
+        setErrorMsg("Your email is not confirmed yet. Please check your inbox for the link, or turn off 'Confirm email' in Supabase.");
+      } else {
+        setErrorMsg(msg || "Authentication failed. Please check your credentials.");
+      }
     } finally {
       setLoading(false);
     }

@@ -102,7 +102,14 @@ export function useAuth() {
       toast.error("Sign up failed", { description: error.message });
       throw error;
     }
-    toast.success("Account created successfully!");
+    if (!data?.access_token && !data?.session) {
+      toast.info("Verification needed", {
+        description: "Check your email for the confirmation link, or disable 'Confirm email' in your Supabase dashboard.",
+        duration: 8000,
+      });
+    } else {
+      toast.success("Account created successfully!");
+    }
     return data;
   }, [isConfigured]);
 
