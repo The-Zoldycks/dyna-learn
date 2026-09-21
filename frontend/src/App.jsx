@@ -13,7 +13,7 @@ import "@xyflow/react/dist/style.css";
 import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
-  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search, Droplets,
+  MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search, Droplets, FolderKanban,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -21,10 +21,15 @@ import CustomNode from "./components/CustomNode.jsx";
 import ChatSkeleton from "./components/ChatSkeleton.jsx";
 import SimpleMarkdown from "./components/SimpleMarkdown.jsx";
 import QuizCard from "./components/QuizCard.jsx";
+import UserMenu from "./components/UserMenu.jsx";
 const JournalModal = lazy(() => import("./components/JournalModal.jsx"));
 const TopicExplorerModal = lazy(() => import("./components/TopicExplorerModal.jsx"));
 const FlashcardPracticeModal = lazy(() => import("./components/FlashcardPracticeModal.jsx"));
 const FluidBackdrop = lazy(() => import("./components/FluidBackdrop.jsx"));
+const AuthModal = lazy(() => import("./components/AuthModal.jsx"));
+const SessionDrawer = lazy(() => import("./components/SessionDrawer.jsx"));
+import { useAuth } from "./hooks/useAuth.js";
+import { useSessions } from "./hooks/useSessions.js";
 import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
 import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
@@ -146,6 +151,18 @@ export default function App() {
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+
+  const {
+    user,
+    profile,
+    initials,
+    loginWithGoogle,
+    loginWithPassword,
+    signUpWithPassword,
+    logout,
+  } = useAuth();
 
   const recognitionRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -442,6 +459,39 @@ export default function App() {
     reactFlowInstanceRef.current.fitView(opts);
   }, []);
 
+  const handleRestoreSession = useCallback(
+    ({ nodes: newNodes, edges: newEdges, chatHistory: newChat }) => {
+      setNodes(newNodes || []);
+      setEdges(newEdges || []);
+      setChatHistory(newChat || []);
+      setSelectedNodeId(null);
+      setTimeout(() => triggerFitView(), 100);
+    },
+    [setNodes, setEdges, triggerFitView]
+  );
+
+  const {
+    sessions,
+    activeSessionId,
+    activeSessionTitle,
+    isSaving,
+    conflictData,
+    saveSession,
+    openSession,
+    createNewSession,
+    deleteSession,
+    renameSession,
+    triggerIdleAutoSave,
+    resolveConflictReload,
+    resolveConflictSaveCopy,
+  } = useSessions({
+    user,
+    nodes,
+    edges,
+    chatHistory,
+    onRestoreSession: handleRestoreSession,
+  });
+
   // ---- Node/edge formatting ----
   const inferIcon = (label = "") => {
     const l = label.toLowerCase();
@@ -730,6 +780,7 @@ export default function App() {
       }
       if (retryLabel) toast.dismiss();
       track("question_asked", { hasImage: !!payload.image, nodeSelected: !!payload.selectedNodeId });
+      triggerIdleAutoSave();
       return true;
     } catch (err) {
       console.error(err);
@@ -756,7 +807,7 @@ export default function App() {
       });
       return false;
     } finally { setLoading(false); }
-  }, [speakText, applyDiagramUpdateStable, autoNarrate]);
+  }, [speakText, applyDiagramUpdateStable, autoNarrate, triggerIdleAutoSave]);
 
   // ---- Form submit ----
   const handleSubmit = async (e) => {
@@ -1025,17 +1076,29 @@ export default function App() {
   }, [nodes, edges, renderDiagramPng]);
 
   // ---- Retention Engine Handlers -----------------------------------------
-  const handleSaveSnapshot = useCallback(() => {
-    const title = window.prompt("Enter a title for this lesson (e.g. 'Database Normalization'):");
-    if (!title) return;
-    try {
-      saveSnapshot(title, nodes, edges, chatHistory);
-      track("snapshot_saved");
-      toast.success(`Lesson "${title}" saved to Journal!`);
-    } catch (err) {
-      toast.error(err.message);
+  const handleSaveWorkspace = useCallback(() => {
+    if (user) {
+      const defaultTitle = activeSessionTitle || "Study Session";
+      const title = window.prompt("Save workspace as:", defaultTitle);
+      if (!title) return;
+      saveSession({ title, isManual: true });
+    } else {
+      const title = window.prompt("Enter a title for this lesson (e.g. 'Database Normalization'):");
+      if (!title) return;
+      try {
+        saveSnapshot(title, nodes, edges, chatHistory);
+        track("snapshot_saved");
+        toast.success(`Lesson "${title}" saved to local Journal!`, {
+          action: {
+            label: "Sign in to sync",
+            onClick: () => setAuthModalOpen(true),
+          },
+        });
+      } catch (err) {
+        toast.error(err.message);
+      }
     }
-  }, [nodes, edges, chatHistory]);
+  }, [user, activeSessionTitle, saveSession, nodes, edges, chatHistory]);
 
   const handleLoadSnapshot = useCallback((snap) => {
     if (!confirm(`Load "${snap.title}"? Current unsaved progress will be lost.`)) return;
@@ -1248,6 +1311,14 @@ export default function App() {
       {/* ── Floating Top Actions (Top Right) ── */}
       <header className="absolute top-4 right-4 sm:top-5 sm:right-5 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-xl px-2 py-2 rounded-2xl shadow-sm border border-slate-200/60">
         <button
+          onClick={() => setSessionDrawerOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
+          title="Open study workspaces"
+        >
+          <FolderKanban size={14} className="text-violet-600" />
+          <span className="hidden sm:inline">Sessions</span>
+        </button>
+        <button
           onClick={() => setTopicExplorerOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
         >
@@ -1262,28 +1333,25 @@ export default function App() {
           <span className="hidden sm:inline">Journal</span>
         </button>
         <button
-          onClick={handleSaveSnapshot}
-          disabled={nodes.length <= 1}
+          onClick={handleSaveWorkspace}
+          disabled={nodes.length <= 1 || isSaving}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50 transition shadow-sm"
         >
-          <Save size={14} />
-          <span className="hidden sm:inline">Save</span>
+          {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          <span className="hidden sm:inline">{isSaving ? "Saving…" : "Save"}</span>
         </button>
         <button
           onClick={() => setFluidOn((v) => !v)}
-          aria-pressed={fluidOn}
-          aria-label={fluidOn ? "Turn off fluid cursor background" : "Turn on fluid cursor background"}
-          title={fluidOn ? "Fluid background: on" : "Fluid background: off"}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition border ${
             fluidOn
-              ? "bg-violet-100 text-violet-700 hover:bg-violet-200"
-              : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              ? "bg-violet-50 text-violet-700 border-violet-200/80 shadow-sm"
+              : "text-slate-400 border-transparent hover:text-slate-600"
           }`}
+          title={fluidOn ? "Turn off ambient backdrop" : "Turn on ambient backdrop"}
+          aria-label={fluidOn ? "Turn off ambient fluid animation" : "Turn on ambient fluid animation"}
         >
-          <Droplets size={14} />
-          <span className="hidden sm:inline">Fluid</span>
+          <Droplets size={13} className={fluidOn ? "text-violet-600" : "text-slate-400"} />
         </button>
-        <div className="w-px h-5 bg-slate-300 mx-1 hidden sm:block" />
         <button
           onClick={handleClear}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 text-xs font-semibold transition"
@@ -1291,6 +1359,16 @@ export default function App() {
         >
           <Trash2 size={14} /> <span className="hidden md:inline">Clear</span>
         </button>
+
+        {/* User Account Menu / Sign In */}
+        <UserMenu
+          user={user}
+          profile={profile}
+          initials={initials}
+          onOpenAuth={() => setAuthModalOpen(true)}
+          onOpenSessions={() => setSessionDrawerOpen(true)}
+          onLogout={logout}
+        />
       </header>
 
       {/* ── Left panel: Chat Sidebar (Floating on Desktop, Full on Mobile) ── */}
@@ -1788,6 +1866,36 @@ export default function App() {
             onFinish={() => {
               toast.success("Great job! Spaced repetition intervals updated.", { icon: "🎉" });
             }}
+          />
+        </Suspense>
+      )}
+
+      {authModalOpen && (
+        <Suspense fallback={null}>
+          <AuthModal
+            open={authModalOpen}
+            onClose={() => setAuthModalOpen(false)}
+            onLoginWithGoogle={loginWithGoogle}
+            onLoginWithPassword={loginWithPassword}
+            onSignUpWithPassword={signUpWithPassword}
+          />
+        </Suspense>
+      )}
+
+      {sessionDrawerOpen && (
+        <Suspense fallback={null}>
+          <SessionDrawer
+            open={sessionDrawerOpen}
+            onClose={() => setSessionDrawerOpen(false)}
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            conflictData={conflictData}
+            onOpenSession={openSession}
+            onCreateNewSession={() => createNewSession(INITIAL_NODE)}
+            onRenameSession={renameSession}
+            onDeleteSession={deleteSession}
+            onResolveConflictReload={resolveConflictReload}
+            onResolveConflictSaveCopy={resolveConflictSaveCopy}
           />
         </Suspense>
       )}
