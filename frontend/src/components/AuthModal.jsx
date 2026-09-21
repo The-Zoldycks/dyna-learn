@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect } from "react";
-import { X, Sparkles, Mail, Lock, User, Loader2, ArrowRight } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { X, Sparkles, Mail, Lock, User, Loader2, ArrowRight, Eye, EyeOff, Check } from "lucide-react";
 
 export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWithPassword, onSignUpWithPassword }) {
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -24,6 +25,38 @@ export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWit
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
+
+  const strength = useMemo(() => {
+    if (!password) return { score: 0, label: "", color: "bg-slate-200", text: "text-slate-400" };
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
+    if (/\d/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++;
+
+    switch (score) {
+      case 1:
+        return { score: 1, label: "Weak", color: "bg-rose-500", text: "text-rose-600" };
+      case 2:
+        return { score: 2, label: "Fair", color: "bg-amber-500", text: "text-amber-600" };
+      case 3:
+        return { score: 3, label: "Good", color: "bg-blue-500", text: "text-blue-600" };
+      case 4:
+        return { score: 4, label: "Strong", color: "bg-emerald-500", text: "text-emerald-600" };
+      default:
+        return { score: 0, label: "Too short", color: "bg-rose-400", text: "text-rose-500" };
+    }
+  }, [password]);
+
+  const rules = useMemo(
+    () => [
+      { label: "8+ characters", met: password.length >= 8 },
+      { label: "Upper & lowercase", met: /[a-z]/.test(password) && /[A-Z]/.test(password) },
+      { label: "Number (0-9)", met: /\d/.test(password) },
+      { label: "Symbol (!@#$)", met: /[^A-Za-z0-9]/.test(password) },
+    ],
+    [password]
+  );
 
   if (!open) return null;
 
@@ -180,18 +213,79 @@ export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWit
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Password</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700">Password</label>
+                {mode === "signup" && password && (
+                  <span className={`text-[10px] font-bold uppercase tracking-wider transition-colors duration-200 ${strength.text}`}>
+                    {strength.label}
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                  className="w-full pl-9 pr-10 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/50 transition focus:outline-none"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  title={showPassword ? "Hide password" : "Show password"}
+                  tabIndex={-1}
+                >
+                  <span className="inline-block transition-transform duration-200 hover:scale-110">
+                    {showPassword ? (
+                      <EyeOff size={14} className="text-violet-600 animate-in fade-in zoom-in-75 duration-150" />
+                    ) : (
+                      <Eye size={14} className="text-slate-400 hover:text-slate-600 animate-in fade-in zoom-in-75 duration-150" />
+                    )}
+                  </span>
+                </button>
               </div>
+
+              {/* Dynamic Password Strength Monitor (Sign up mode only) */}
+              {mode === "signup" && password && (
+                <div className="mt-2.5 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  {/* Segmented Strength Bar */}
+                  <div className="grid grid-cols-4 gap-1.5 h-1.5 w-full">
+                    {[1, 2, 3, 4].map((level) => (
+                      <div
+                        key={level}
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          strength.score >= level ? strength.color : "bg-slate-200"
+                        }`}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Checklist criteria */}
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-1 pt-1">
+                    {rules.map((rule, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex items-center gap-1.5 text-[10px] transition-colors duration-200 ${
+                          rule.met ? "text-emerald-700 font-medium" : "text-slate-400"
+                        }`}
+                      >
+                        <div
+                          className={`w-3.5 h-3.5 rounded-full flex items-center justify-center transition-all duration-200 ${
+                            rule.met ? "bg-emerald-100 text-emerald-600 font-bold" : "bg-slate-100 text-slate-300"
+                          }`}
+                        >
+                          <Check size={8} strokeWidth={3} />
+                        </div>
+                        <span className="truncate">{rule.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <button
@@ -217,7 +311,11 @@ export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWit
                 Don't have an account yet?{" "}
                 <button
                   type="button"
-                  onClick={() => setMode("signup")}
+                  onClick={() => {
+                    setMode("signup");
+                    setErrorMsg("");
+                    setShowPassword(false);
+                  }}
                   className="text-violet-600 font-semibold hover:underline"
                 >
                   Create one free
@@ -228,7 +326,11 @@ export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWit
                 Already have an account?{" "}
                 <button
                   type="button"
-                  onClick={() => setMode("login")}
+                  onClick={() => {
+                    setMode("login");
+                    setErrorMsg("");
+                    setShowPassword(false);
+                  }}
                   className="text-violet-600 font-semibold hover:underline"
                 >
                   Sign in
