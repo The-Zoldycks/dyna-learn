@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { X, Plus, Search, Trash2, Edit2, Check, Clock, AlertTriangle, ArrowRight, FolderOpen } from "lucide-react";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 export default function SessionDrawer({
   open,
@@ -18,7 +19,7 @@ export default function SessionDrawer({
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-  const drawerRef = useRef(null);
+  const drawerRef = useFocusTrap(open);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -197,7 +198,7 @@ export default function SessionDrawer({
                     {!isEditing && (
                       <button
                         onClick={() => startRename(s)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition"
+                        className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition"
                         title="Rename workspace"
                       >
                         <Edit2 size={12} />
@@ -225,7 +226,7 @@ export default function SessionDrawer({
                     ) : (
                       <button
                         onClick={() => setConfirmDeleteId(s.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition"
+                        className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition"
                         title="Delete workspace"
                       >
                         <Trash2 size={12} />

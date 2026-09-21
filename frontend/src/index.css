@@ -25,3 +25,24 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+@keyframes mahoraga-step {
+  0%   { transform: rotate(0deg); }
+  50%  { transform: rotate(45deg); }
+  62%  { transform: rotate(43.5deg); }
+  74%  { transform: rotate(45deg); }
+  100% { transform: rotate(45deg); }
+}
+.mahoraga-wheel {
+  --mahoraga-ox: 50%;
+  --mahoraga-oy: 50%;
+  mix-blend-mode: screen;
+  border-radius: 50%;
+  transform-origin: var(--mahoraga-ox) var(--mahoraga-oy);
+  animation: mahoraga-step 1s cubic-bezier(0.3, 1.2, 0.4, 1) infinite;
+}
+/* Dev-only slow-motion center check: add class "mahoraga-slow" to visually verify rotation center */
+.mahoraga-wheel.mahoraga-slow { animation-duration: 4s; }
+@media (prefers-reduced-motion: reduce) {
+  .mahoraga-wheel { animation: none; transform: rotate(0deg); }
+}

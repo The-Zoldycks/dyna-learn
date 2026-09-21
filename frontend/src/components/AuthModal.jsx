@@ -1,30 +1,16 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { X, Sparkles, Mail, Lock, User, Loader2, ArrowRight, Eye, EyeOff, Check } from "lucide-react";
+import { useState, useMemo } from "react";
+import { X, Sparkles, Mail, Lock, User, Loader2, ArrowRight, Eye, EyeOff, Check, AlertTriangle } from "lucide-react";
+import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
 export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWithPassword, onSignUpWithPassword }) {
-  const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const modalRef = useRef(null);
-
-  useEffect(() => {
-    if (open) {
-      const timer = setTimeout(() => modalRef.current?.querySelector("input")?.focus(), 50);
-      return () => clearTimeout(timer);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape" && open) onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  const modalRef = useFocusTrap(open);
 
   const strength = useMemo(() => {
     if (!password) return { score: 0, label: "", color: "bg-slate-200", text: "text-slate-400" };
@@ -141,7 +127,7 @@ export default function AuthModal({ open, onClose, onLoginWithGoogle, onLoginWit
         <div className="p-6">
           {errorMsg && (
             <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 leading-normal flex items-start gap-2">
-              <span className="font-bold">⚠️</span>
+              <AlertTriangle size={12} className="text-red-500 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
           )}

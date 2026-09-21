@@ -1,10 +1,12 @@
 // Lightweight, Zero-dependency Supabase Client for Dyna-learn
 // Uses standard Web Fetch API + PostgREST & Supabase GoTrue Auth
+// Supports PKCE OAuth flow, auto token refresh, proper Promise interface
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || "").trim().replace(/\/+$/, "");
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
 
 const AUTH_STORAGE_KEY = "dyna_supabase_auth_session";
+const PKCE_VERIFIER_KEY = "dyna_pkce_code_verifier";
 
 export function isSupabaseConfigured() {
   return Boolean(
@@ -35,52 +37,153 @@ function setStoredSession(session) {
   } catch {}
 }
 
+function getPkceVerifier() {
+  try {
+    return localStorage.getItem(PKCE_VERIFIER_KEY);
+  } catch { return null; }
+}
+
+function setPkceVerifier(verifier) {
+  try {
+    if (verifier) localStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    else localStorage.removeItem(PKCE_VERIFIER_KEY);
+  } catch {}
+}
+
 // Global subscribers for onAuthStateChange
 const authListeners = new Set();
 function notifyAuthChange(event, session) {
   authListeners.forEach((listener) => {
-    try {
-      listener(event, session);
-    } catch (err) {
-      console.error("Auth listener error:", err);
-    }
+    try { listener(event, session); } catch (err) { console.error("Auth listener error:", err); }
   });
 }
 
-// Check for OAuth hash tokens in URL (e.g. #access_token=...&refresh_token=...) on app load
-if (typeof window !== "undefined" && window.location.hash.includes("access_token=")) {
-  try {
-    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    const accessToken = hashParams.get("access_token");
-    const refreshToken = hashParams.get("refresh_token");
-    const expiresIn = parseInt(hashParams.get("expires_in") || "3600", 10);
+// Schedule token refresh before expiry
+let refreshTimer = null;
+function scheduleTokenRefresh(session) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  if (!session?.expires_at) return;
+  const now = Math.floor(Date.now() / 1000);
+  const expiresIn = session.expires_at - now;
+  if (expiresIn <= 60) {
+    // Already expired or expiring very soon, refresh immediately
+    refreshAccessToken(session.refresh_token);
+    return;
+  }
+  // Refresh 30 seconds before expiry
+  const delayMs = (expiresIn - 30) * 1000;
+  refreshTimer = setTimeout(() => refreshAccessToken(session.refresh_token), delayMs);
+}
 
-    if (accessToken) {
-      const initialSession = {
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        expires_at: Math.floor(Date.now() / 1000) + expiresIn,
-      };
-      setStoredSession(initialSession);
-      // Clean up hash from URL without page reload
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-      // Fetch user profile in background
-      setTimeout(() => {
-        auth.getUser().then(({ data }) => {
-          if (data?.user) {
-            initialSession.user = data.user;
-            setStoredSession(initialSession);
-            notifyAuthChange("SIGNED_IN", initialSession);
-          }
-        });
-      }, 0);
-    }
+async function refreshAccessToken(refreshToken) {
+  if (!refreshToken || !isSupabaseConfigured()) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
+    const json = await res.json();
+    const newSession = {
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
+      expires_at: Math.floor(Date.now() / 1000) + json.expires_in,
+      user: json.user,
+    };
+    setStoredSession(newSession);
+    scheduleTokenRefresh(newSession);
+    notifyAuthChange("TOKEN_REFRESHED", newSession);
   } catch (err) {
-    console.warn("Failed to parse OAuth callback hash:", err);
+    console.warn("Token refresh failed, signing out:", err);
+    setStoredSession(null);
+    notifyAuthChange("SIGNED_OUT", null);
+  }
+}
+
+// Check for OAuth hash tokens (legacy implicit flow) on app load
+if (typeof window !== "undefined") {
+  const hash = window.location.hash;
+  if (hash.includes("access_token=")) {
+    try {
+      const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+      const accessToken = hashParams.get("access_token");
+      const refreshToken = hashParams.get("refresh_token");
+      const expiresIn = parseInt(hashParams.get("expires_in") || "3600", 10);
+      if (accessToken) {
+        const initialSession = {
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+        };
+        setStoredSession(initialSession);
+        scheduleTokenRefresh(initialSession);
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        setTimeout(() => {
+          auth.getUser().then(({ data }) => {
+            if (data?.user) {
+              initialSession.user = data.user;
+              setStoredSession(initialSession);
+              notifyAuthChange("SIGNED_IN", initialSession);
+            }
+          });
+        }, 0);
+      }
+    } catch (err) {
+      console.warn("Failed to parse OAuth callback hash:", err);
+    }
+  }
+  // Check for PKCE code exchange (modern flow: ?code=...)
+  const searchParams = new URLSearchParams(window.location.search);
+  const code = searchParams.get("code");
+  if (code) {
+    const verifier = getPkceVerifier();
+    if (verifier) {
+      (async () => {
+        try {
+          const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({ code, code_verifier: verifier }),
+          });
+          if (!res.ok) throw new Error(`PKCE exchange failed: ${res.status}`);
+          const json = await res.json();
+          const session = {
+            access_token: json.access_token,
+            refresh_token: json.refresh_token,
+            expires_at: Math.floor(Date.now() / 1000) + json.expires_in,
+            user: json.user,
+          };
+          setStoredSession(session);
+          scheduleTokenRefresh(session);
+          setPkceVerifier(null);
+          window.history.replaceState(null, "", window.location.pathname);
+          notifyAuthChange("SIGNED_IN", session);
+        } catch (err) {
+          console.error("PKCE code exchange failed:", err);
+          setPkceVerifier(null);
+        }
+      })();
+    }
   }
 }
 
 // ── Auth Module ─────────────────────────────────────────────────────────────
+function generateCodeVerifier() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return btoa(String.fromCharCode(...array))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=/g, "");
+}
+
 export const auth = {
   getSession() {
     const s = getStoredSession();
@@ -101,8 +204,24 @@ export const auth = {
       });
 
       if (!res.ok) {
+        if (res.status === 401 && session.refresh_token) {
+          // Try refresh once
+          await refreshAccessToken(session.refresh_token);
+          const newSession = getStoredSession();
+          if (newSession?.access_token) {
+            const retry = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+              headers: {
+                apikey: SUPABASE_ANON_KEY,
+                Authorization: `Bearer ${newSession.access_token}`,
+              },
+            });
+            if (retry.ok) {
+              const user = await retry.json();
+              return { data: { user }, error: null };
+            }
+          }
+        }
         if (res.status === 401) {
-          // Token expired or invalid
           setStoredSession(null);
           notifyAuthChange("SIGNED_OUT", null);
         }
@@ -120,27 +239,27 @@ export const auth = {
     if (!isSupabaseConfigured()) {
       return { data: null, error: new Error("Supabase is not configured.") };
     }
-
     try {
       const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_ANON_KEY,
-        },
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
         body: JSON.stringify({ email, password, data }),
       });
-
       const json = await res.json();
       if (!res.ok) {
         return { data: null, error: new Error(json.error_description || json.msg || json.message || "Sign up failed") };
       }
-
       if (json.access_token) {
-        setStoredSession(json);
-        notifyAuthChange("SIGNED_IN", json);
+        const session = {
+          access_token: json.access_token,
+          refresh_token: json.refresh_token,
+          expires_at: Math.floor(Date.now() / 1000) + json.expires_in,
+          user: json.user,
+        };
+        setStoredSession(session);
+        scheduleTokenRefresh(session);
+        notifyAuthChange("SIGNED_IN", session);
       }
-
       return { data: json, error: null };
     } catch (err) {
       return { data: null, error: err };
@@ -151,24 +270,25 @@ export const auth = {
     if (!isSupabaseConfigured()) {
       return { data: null, error: new Error("Supabase is not configured.") };
     }
-
     try {
       const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_ANON_KEY,
-        },
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
         body: JSON.stringify({ email, password }),
       });
-
       const json = await res.json();
       if (!res.ok) {
         return { data: null, error: new Error(json.error_description || json.msg || json.message || "Invalid login credentials") };
       }
-
-      setStoredSession(json);
-      notifyAuthChange("SIGNED_IN", json);
+      const session = {
+        access_token: json.access_token,
+        refresh_token: json.refresh_token,
+        expires_at: Math.floor(Date.now() / 1000) + json.expires_in,
+        user: json.user,
+      };
+      setStoredSession(session);
+      scheduleTokenRefresh(session);
+      notifyAuthChange("SIGNED_IN", session);
       return { data: json, error: null };
     } catch (err) {
       return { data: null, error: err };
@@ -179,7 +299,10 @@ export const auth = {
     if (!isSupabaseConfigured()) {
       return { error: new Error("Supabase is not configured.") };
     }
-    const targetUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}`;
+    const verifier = generateCodeVerifier();
+    setPkceVerifier(verifier);
+    const challenge = verifier; // PKCE S256 not implemented for brevity; Supabase accepts plain verifier for PKCE
+    const targetUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=plain`;
     window.location.href = targetUrl;
     return { error: null };
   },
@@ -189,20 +312,18 @@ export const auth = {
     if (session?.access_token && isSupabaseConfigured()) {
       fetch(`${SUPABASE_URL}/auth/v1/logout`, {
         method: "POST",
-        headers: {
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${session.access_token}`,
-        },
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}` },
       }).catch(() => {});
     }
+    if (refreshTimer) clearTimeout(refreshTimer);
     setStoredSession(null);
+    setPkceVerifier(null);
     notifyAuthChange("SIGNED_OUT", null);
     return { error: null };
   },
 
   onAuthStateChange(callback) {
     authListeners.add(callback);
-    // Emit initial status
     const currentSession = getStoredSession();
     if (currentSession) {
       callback("INITIAL_SESSION", currentSession);
@@ -230,6 +351,7 @@ class QueryBuilder {
     };
     this.body = null;
     this.isSingle = false;
+    this.returning = false; // for insert with select=id
 
     const session = getStoredSession();
     if (session?.access_token) {
@@ -247,6 +369,7 @@ class QueryBuilder {
     this.method = "POST";
     this.headers.Prefer = "return=representation";
     this.body = JSON.stringify(data);
+    this.returning = true;
     return this;
   }
 
@@ -283,15 +406,34 @@ class QueryBuilder {
     return this;
   }
 
-  async then(resolve, _reject) {
+  // Proper Promise interface
+  then(onFulfilled, onRejected) {
+    return this.execute().then(onFulfilled, onRejected);
+  }
+
+  catch(onRejected) {
+    return this.execute().catch(onRejected);
+  }
+
+  finally(onFinally) {
+    return this.execute().finally(onFinally);
+  }
+
+  async execute() {
     if (!isSupabaseConfigured()) {
-      const res = { data: null, error: new Error("Supabase is not configured.") };
-      return resolve ? resolve(res) : res;
+      return { data: null, error: new Error("Supabase is not configured.") };
     }
 
     try {
+      let finalUrl = this.url;
       const queryString = this.queryParams.toString();
-      const finalUrl = queryString ? `${this.url}?${queryString}` : this.url;
+      if (queryString) finalUrl += `?${queryString}`;
+
+      // For insert, ensure we request the id back
+      if (this.returning && this.method === "POST") {
+        const sep = finalUrl.includes("?") ? "&" : "?";
+        finalUrl += `${sep}select=id`;
+      }
 
       const response = await fetch(finalUrl, {
         method: this.method,
@@ -302,26 +444,21 @@ class QueryBuilder {
       if (!response.ok) {
         const errorJson = await response.json().catch(() => ({}));
         const err = new Error(errorJson.message || errorJson.error || `HTTP ${response.status}`);
-        const result = { data: null, error: err };
-        return resolve ? resolve(result) : result;
+        return { data: null, error: err };
       }
 
       // Handle 204 No Content
       if (response.status === 204) {
-        const result = { data: null, error: null };
-        return resolve ? resolve(result) : result;
+        return { data: null, error: null };
       }
 
       let data = await response.json();
       if (this.isSingle && Array.isArray(data)) {
         data = data[0] || null;
       }
-
-      const result = { data, error: null };
-      return resolve ? resolve(result) : result;
+      return { data, error: null };
     } catch (err) {
-      const result = { data: null, error: err };
-      return resolve ? resolve(result) : result;
+      return { data: null, error: err };
     }
   }
 }

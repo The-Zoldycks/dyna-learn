@@ -14,6 +14,7 @@ import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
   MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search, Droplets, FolderKanban,
+  Target, Lightbulb, Sprout, AlertTriangle, Trophy, Dumbbell,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -28,6 +29,7 @@ const FlashcardPracticeModal = lazy(() => import("./components/FlashcardPractice
 const FluidBackdrop = lazy(() => import("./components/FluidBackdrop.jsx"));
 const AuthModal = lazy(() => import("./components/AuthModal.jsx"));
 const SessionDrawer = lazy(() => import("./components/SessionDrawer.jsx"));
+import AdaptingIndicator from "./components/AdaptingIndicator.jsx";
 import { useAuth } from "./hooks/useAuth.js";
 import { useSessions } from "./hooks/useSessions.js";
 import { getLayoutedElements } from "./utils/layout.js";
@@ -153,6 +155,13 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  // Collapsible audio panels — collapsed by default so the tutor response area stays clean
+  const [voiceOpen, setVoiceOpen] = useState(
+    () => { try { return localStorage.getItem("dyna-voice-open") === "1"; } catch { return false; } }
+  );
+  const [playerOpen, setPlayerOpen] = useState(
+    () => { try { return localStorage.getItem("dyna-player-open") === "1"; } catch { return false; } }
+  );
 
   const {
     user,
@@ -314,6 +323,8 @@ export default function App() {
   // Persist selected voice
   useEffect(() => { if (selectedVoice) localStorage.setItem("dyna-voice", selectedVoice); }, [selectedVoice]);
   useEffect(() => { try { localStorage.setItem("dyna-fluid", fluidOn ? "1" : "0"); } catch {} }, [fluidOn]);
+  useEffect(() => { try { localStorage.setItem("dyna-voice-open", voiceOpen ? "1" : "0"); } catch {} }, [voiceOpen]);
+  useEffect(() => { try { localStorage.setItem("dyna-player-open", playerOpen ? "1" : "0"); } catch {} }, [playerOpen]);
 
   // ---- Helpers ----
   const toggleExpand = (idx) => {
@@ -1122,7 +1133,7 @@ export default function App() {
     if (activeReviewId) {
       updateSRSItem(activeReviewId, passed);
       setActiveReviewId(null);
-      toast.success(passed ? "Great job! Review interval increased." : "Keep studying! Review scheduled for tomorrow.", { icon: passed ? "🎉" : "💪" });
+      toast.success(passed ? "Great job! Review interval increased." : "Keep studying! Review scheduled for tomorrow.", { icon: passed ? <Trophy size={14} className="text-violet-600" /> : <Dumbbell size={14} className="text-violet-600" /> });
     }
   }, [activeReviewId]);
 
@@ -1224,11 +1235,11 @@ export default function App() {
           <Background color="#cbd5e1" gap={24} size={1.5} />
           <Controls className="mb-[60px] sm:mb-0 bg-white/90 backdrop-blur border-slate-200 shadow-sm" />
 
-          {/* Collapsible Canvas Radar Minimap */}
+          {/* Collapsible Canvas Radar Minimap — bottom-right, parked clearly above action bar */}
           {showMinimap && (
             <MiniMap
-              position="bottom-left"
-              className="mb-[60px] sm:mb-2 ml-2 !bg-white/90 !backdrop-blur-md !border !border-slate-200 !rounded-2xl !shadow-lg overflow-hidden"
+              position="bottom-right"
+              className="mb-[150px] sm:!bottom-20 sm:mb-0 mr-2 !bg-white/90 !backdrop-blur-md !border !border-slate-200 !rounded-2xl !shadow-lg overflow-hidden"
               nodeColor={(n) => (n.data?.highlight ? "#fb7185" : "#8b5cf6")}
               maskColor="rgba(241, 245, 249, 0.7)"
               zoomable
@@ -1295,6 +1306,11 @@ export default function App() {
             <Panel position="bottom-center" className="mb-[70px] sm:mb-4 flex items-center gap-2 bg-white/90 backdrop-blur border border-rose-200 rounded-full px-4 py-2 text-xs font-medium text-rose-700 shadow-sm pointer-events-none">
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0 border border-white" />
               Highlighted — confusion detected
+            </Panel>
+          )}
+          {loading && nodes.length > 1 && (
+            <Panel position="top-center" className="pointer-events-none mt-4">
+              <AdaptingIndicator size={24} />
             </Panel>
           )}
         </ReactFlow>
@@ -1446,9 +1462,9 @@ export default function App() {
                       setQuestion(`Explain "${selectedNodeLabel}" in depth and how it works.`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm"
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1"
                   >
-                    🔍 Deep dive
+                    <Search size={11} className="text-violet-600" /> Deep dive
                   </button>
                   <button
                     type="button"
@@ -1456,9 +1472,9 @@ export default function App() {
                       setQuestion(`Break down "${selectedNodeLabel}" into sub-concepts on the canvas.`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm"
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1"
                   >
-                    🌱 Break down
+                    <Sprout size={11} className="text-violet-600" /> Break down
                   </button>
                   <button
                     type="button"
@@ -1466,9 +1482,9 @@ export default function App() {
                       setQuestion(`Quiz me on "${selectedNodeLabel}".`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm"
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1"
                   >
-                    🎯 Quiz me
+                    <Target size={11} className="text-violet-600" /> Quiz me
                   </button>
                   <button
                     type="button"
@@ -1476,9 +1492,9 @@ export default function App() {
                       setQuestion(`Give a real-world analogy or example for "${selectedNodeLabel}".`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm"
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1"
                   >
-                    💡 Analogy
+                    <Lightbulb size={11} className="text-violet-600" /> Analogy
                   </button>
                 </div>
               </div>
@@ -1487,22 +1503,33 @@ export default function App() {
             {/* Large-canvas warning */}
             {isCanvasLarge && (
               <div className="mt-2 flex items-center gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                <span className="text-amber-700">⚠️ Large canvas ({nodes.length} nodes) — consider clearing for best AI results.</span>
+                <span className="text-amber-700 inline-flex items-center gap-1.5"><AlertTriangle size={12} className="text-amber-600 shrink-0" /> Large canvas ({nodes.length} nodes) — consider clearing for best AI results.</span>
               </div>
             )}
 
-            {/* Voice selector */}
-            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700">
+            {/* Voice selector — collapsible, collapsed by default */}
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setVoiceOpen((v) => !v)}
+                aria-expanded={voiceOpen}
+                aria-controls="voice-panel"
+                className="w-full flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 px-3 py-2.5 hover:bg-slate-100/70 transition"
+              >
                 <Mic size={12} className="text-violet-600" /> Voice
-                <span className="ml-auto text-[10px] text-slate-500">{edgeVoices.length + browserVoices.length} voices</span>
-              </div>
+                <span className="ml-2 text-[10px] font-medium text-slate-400">
+                  {edgeVoices.length + browserVoices.length} voices{autoNarrate ? " · auto" : ""}
+                </span>
+                <ChevronDown size={13} className={`ml-auto text-slate-400 transition-transform ${voiceOpen ? "rotate-180" : ""}`} />
+              </button>
+              {voiceOpen && (
+              <div id="voice-panel" className="px-3 pb-3">
               <label htmlFor="voice-select" className="sr-only">Choose a narration voice</label>
               <select
                 id="voice-select"
                 value={selectedVoice}
                 onChange={(e) => setSelectedVoice(e.target.value)}
-                className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500"
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500"
               >
                 <optgroup label="Neural — Edge (online)">
                   {edgeVoices.length
@@ -1539,6 +1566,8 @@ export default function App() {
                   {playbackSpeed}x speed
                 </button>
               </div>
+              </div>
+              )}
             </div>
           </div>
 
@@ -1579,7 +1608,12 @@ export default function App() {
                       ? `Found ${filteredChat.length} match${filteredChat.length === 1 ? "" : "es"}`
                       : "Conversation"}
                   </p>
-                  {chatSearchQuery.trim() && (
+                  {loading && chatHistory.length > 0 ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1">
+                      <img src="/mahoraga-wheel.png" alt="" aria-hidden="true" className="mahoraga-wheel aspect-square object-contain shrink-0" style={{ width: 14, height: 14 }} />
+                      <span className="text-[10px] font-semibold text-violet-700">Adapting</span>
+                    </span>
+                  ) : chatSearchQuery.trim() ? (
                     <button
                       type="button"
                       onClick={() => setChatSearchQuery("")}
@@ -1587,7 +1621,7 @@ export default function App() {
                     >
                       Clear search
                     </button>
-                  )}
+                  ) : null}
                 </div>
 
                 {filteredChat.length === 0 ? (
@@ -1749,7 +1783,7 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={loading || isOffline || (!question.trim() && !selectedImage)}
-                  aria-label={loading ? "Tutor is thinking" : "Send your question to the tutor"}
+                  aria-label={loading ? "Adapting diagram" : "Send your question to the tutor"}
                   className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white font-medium text-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md"
                 >
                   {loading
@@ -1758,27 +1792,35 @@ export default function App() {
                 </button>
               </div>
               {loading && (
-                <p id="submit-hint-loading" className="text-xs text-center text-violet-600">
-                  Tutor is thinking — canvas will update when done
+                <p id="submit-hint-loading" className="text-xs text-center text-violet-600 flex items-center justify-center gap-1.5">
+                  <img src="/mahoraga-wheel.png" alt="" aria-hidden="true" className="mahoraga-wheel aspect-square object-contain shrink-0" style={{ width: 16, height: 16 }} />
+                  Adapting — canvas will update when done
                 </p>
               )}
               {isOffline && !loading && (
-                <p id="submit-hint-offline" className="text-xs text-center text-amber-600 font-medium">
-                  ⚠ You're offline — reconnect to send a message
+                <p id="submit-hint-offline" className="text-xs text-center text-amber-600 font-medium flex items-center justify-center gap-1">
+                  <span className="w-3 h-3 flex items-center justify-center"><svg className="w-3 h-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></span>
+                  You're offline — reconnect to send a message
                 </p>
               )}
             </form>
 
 
-            {/* Last-speech mini-player */}
+            {/* Last-speech mini-player — collapsible, collapsed by default */}
             {lastSpeech && (
-              <div className="rounded-xl bg-white border border-slate-200 shadow-sm p-3">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 mb-2">
+              <div className="rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setPlayerOpen((v) => !v)}
+                  aria-expanded={playerOpen}
+                  aria-controls="last-explanation-panel"
+                  className="w-full flex items-center gap-2 text-xs font-semibold text-slate-700 px-3 py-2.5 hover:bg-slate-50 transition"
+                >
                   {isTTSLoading
                     ? <Loader2 size={12} className="text-violet-600 animate-spin" />
                     : <Volume2 size={12} className={isSpeaking ? "text-violet-600 animate-pulse" : ""} />}
                   Last Explanation
-                  <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full border ${
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
                     isTTSLoading
                       ? "bg-violet-100 text-violet-700 border-violet-200"
                       : isSpeaking
@@ -1789,7 +1831,10 @@ export default function App() {
                   }`}>
                     {isTTSLoading ? "Loading audio…" : isPaused ? "Paused" : isSpeaking ? "Playing" : "Ready"}
                   </span>
-                </div>
+                  <ChevronDown size={13} className={`ml-auto text-slate-400 transition-transform ${playerOpen ? "rotate-180" : ""}`} />
+                </button>
+                {playerOpen && (
+                <div id="last-explanation-panel" className="px-3 pb-3">
                 <div className="flex gap-1 mb-2">
                   <button onClick={handleReplay} disabled={isSpeaking || isTTSLoading} className="flex-1 py-1.5 rounded-lg bg-violet-600 text-white text-xs disabled:opacity-40">Replay</button>
                   <button onClick={isPaused ? resumeSpeech : pauseSpeech} disabled={!isSpeaking && !isPaused} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-200 text-xs disabled:opacity-40">{isPaused ? "Resume" : "Pause"}</button>
@@ -1804,6 +1849,8 @@ export default function App() {
                     {playbackSpeed}x
                   </button>
                 </div>
+                </div>
+                )}
               </div>
             )}
           </div>
@@ -1864,7 +1911,7 @@ export default function App() {
             onClose={() => setPracticeModalOpen(false)}
             items={practiceItems}
             onFinish={() => {
-              toast.success("Great job! Spaced repetition intervals updated.", { icon: "🎉" });
+              toast.success("Great job! Spaced repetition intervals updated.", { icon: <Trophy size={14} className="text-violet-600" /> });
             }}
           />
         </Suspense>

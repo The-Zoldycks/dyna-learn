@@ -165,7 +165,7 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
       try {
         if (id) {
           // Update existing with Optimistic Concurrency Control (version checking)
-          const { data, error } = await supabase
+          const { data, error, count: _count } = await supabase
             .from("study_sessions")
             .update({
               title: title || undefined,
@@ -175,24 +175,29 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
               version: activeSessionVersion + 1,
               updated_at: new Date().toISOString(),
             })
-            .eq("id", id);
+            .eq("id", id)
+            .eq("version", activeSessionVersion)
+            .select("id, version");
 
           if (error) {
-            // Check for conflict
-            console.warn("Save failed, checking for conflict:", error);
+            throw error;
+          }
+
+          // OCC: if 0 rows updated, version mismatch -> conflict
+          if (!data || data.length === 0) {
             const { data: latest } = await supabase
               .from("study_sessions")
               .select("*")
               .eq("id", id)
               .single();
 
-            if (latest && latest.version > activeSessionVersion) {
+            if (latest) {
               setConflictData(latest);
               toast.error("Cloud conflict: this session was modified on another device.");
               setIsSaving(false);
               return null;
             }
-            throw error;
+            throw new Error("Session not found");
           }
 
           setActiveSessionVersion((v) => v + 1);
@@ -212,10 +217,12 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
               edges: targetEdges,
               chat_history: targetChat,
               version: 1,
-            });
+            })
+            .select("id")
+            .single();
 
           if (error) throw error;
-          const newId = Array.isArray(data) ? data[0]?.id : data?.id;
+          const newId = data?.id;
           if (newId) {
             setActiveSessionId(newId);
             localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, newId);
