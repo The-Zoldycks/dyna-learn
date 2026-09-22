@@ -10,6 +10,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Precache static assets (CSS/JS handled automatically by Workbox)
       includeAssets: ['dyna-learn-doc-icon.png', 'dyna-learn-logo-blue.png', 'mahoraga-wheel.png'],
       manifest: {
         name: 'Dyna-learn — Interactive AI Tutor',
@@ -20,16 +21,19 @@ export default defineConfig({
         display: 'standalone',
         scope: '/',
         start_url: '/',
+        // Icon is 151x151 — declare accurately so Chrome install banner works correctly.
+        // "any maskable" on the same file is fine for basic installs; upgrade to a
+        // purpose-built maskable icon if branding needs safe-zone padding later.
         icons: [
           {
             src: '/dyna-learn-doc-icon.png',
-            sizes: '192x192',
+            sizes: '151x151',
             type: 'image/png',
             purpose: 'any'
           },
           {
             src: '/dyna-learn-doc-icon.png',
-            sizes: '512x512',
+            sizes: '151x151',
             type: 'image/png',
             purpose: 'maskable'
           }
@@ -45,17 +49,35 @@ export default defineConfig({
         ]
       },
       workbox: {
+        // Precache everything built by Vite
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
+
+        // SPA offline fallback — serve index.html for any navigate request not in precache
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [
+          // Don't intercept API calls or Supabase auth redirects
+          /^\/api\//,
+          /^\/auth\//,
+        ],
+
         runtimeCaching: [
+          // Supabase API — always network, never cache (auth tokens, live data)
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
             handler: 'NetworkOnly'
           },
+          // Render backend — network only (AI responses must be live)
           {
-            urlPattern: /^https:\/\/.*\.vercel\.app\/.*/i,
-            handler: 'NetworkFirst',
+            urlPattern: /^https:\/\/.*\.onrender\.com\/.*/i,
+            handler: 'NetworkOnly'
+          },
+          // Google Fonts (if ever added) — cache first
+          {
+            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
+            handler: 'CacheFirst',
             options: {
-              networkTimeoutSeconds: 10
+              cacheName: 'google-fonts',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 }
             }
           }
         ],
