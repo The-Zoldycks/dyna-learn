@@ -627,6 +627,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(90000),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -672,13 +673,20 @@ export default function App() {
       const code = err.code || "";
       const isRateLimit =
         code === "GEMINI_RATE_LIMIT" ||
-        err.message.includes("429") ||
-        err.message.includes("rate limit");
+        (err.message || "").includes("429") ||
+        (err.message || "").includes("rate limit");
+      const isTimeout = err.name === "TimeoutError" || err.name === "AbortError";
+      const isNetwork =
+        err instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(err.message || "");
       const description = isRateLimit
         ? "Gemini free-tier limit hit — wait ~20s before retrying."
-        : err.message || "Failed to fetch tutor response";
+        : isTimeout
+          ? "Request timed out after 90s — backend may be busy. Retry in a moment."
+          : isNetwork
+            ? "Cannot reach backend — check your internet connection, then Retry."
+            : err.message || "Failed to fetch tutor response";
 
-      toast.error(isRateLimit ? "Rate limit hit" : "Tutor unavailable", {
+      toast.error(isRateLimit ? "Rate limit hit" : isNetwork || isTimeout ? "Connection problem" : "Tutor unavailable", {
         description,
         duration: Infinity,
         action: {
