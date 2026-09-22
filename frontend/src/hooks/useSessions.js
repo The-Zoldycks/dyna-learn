@@ -445,6 +445,44 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
     });
   }, [conflictData, saveSession]);
 
+  // ── Share Session (mark public, return short URL) ─────────────────────────
+  const shareSession = useCallback(
+    async (sessionId = activeSessionId) => {
+      if (!isConfigured || !sessionId) return null;
+      try {
+        const { error } = await supabase
+          .from("study_sessions")
+          .update({ is_public: true })
+          .eq("id", sessionId);
+        if (error) throw error;
+        return `${window.location.origin}/?share=${sessionId}`;
+      } catch (err) {
+        console.error("Failed to make session public:", err);
+        return null;
+      }
+    },
+    [isConfigured, activeSessionId]
+  );
+
+  // ── Load a Shared Session by UUID (public read — no auth needed) ──────────
+  const loadSharedSession = useCallback(
+    async (sessionId) => {
+      if (!sessionId || !isSupabaseConfigured()) return null;
+      try {
+        const { data, error } = await supabase
+          .from("study_sessions")
+          .select("id, title, nodes, edges, chat_history")
+          .eq("id", sessionId)
+          .single();
+        if (error || !data) return null;
+        return data;
+      } catch {
+        return null;
+      }
+    },
+    []
+  );
+
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   return {
@@ -463,8 +501,11 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
     resolveConflictReload,
     resolveConflictSaveCopy,
     refreshSessions: fetchSessions,
+    shareSession,
+    loadSharedSession,
   };
 }
+
 
 function inferSessionTitle(nodes = [], chat = []) {
   if (chat.length > 0 && chat[0]?.text) {

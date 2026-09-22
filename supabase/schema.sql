@@ -23,6 +23,7 @@ create table if not exists public.study_sessions (
   edges jsonb not null default '[]'::jsonb,
   chat_history jsonb not null default '[]'::jsonb,
   version int not null default 1,
+  is_public boolean not null default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -44,6 +45,7 @@ create table if not exists public.srs_cards (
 
 -- Indexes for lightning fast queries
 create index if not exists idx_sessions_user on public.study_sessions(user_id, updated_at desc);
+create index if not exists idx_sessions_public on public.study_sessions(id) where is_public = true;
 create index if not exists idx_srs_user_review on public.srs_cards(user_id, next_review_at);
 
 -- Row-Level Security (RLS) policies
@@ -58,12 +60,17 @@ create policy "Users can view and update own profile"
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
--- Study Sessions: users can only access their own workspaces
+-- Study Sessions: users can manage their own; anyone can read public sessions
 drop policy if exists "Users can manage own sessions" on public.study_sessions;
 create policy "Users can manage own sessions"
   on public.study_sessions for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+drop policy if exists "Anyone can read public sessions" on public.study_sessions;
+create policy "Anyone can read public sessions"
+  on public.study_sessions for select
+  using (is_public = true);
 
 -- SRS Cards: users can only access their own cards
 drop policy if exists "Users can manage own srs cards" on public.srs_cards;
@@ -92,3 +99,14 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ==============================================================================
+-- Migration: add is_public column if upgrading an existing database
+-- Run this ONCE in the Supabase SQL editor if the table already exists:
+-- ==============================================================================
+-- alter table public.study_sessions add column if not exists is_public boolean not null default false;
+-- create index if not exists idx_sessions_public on public.study_sessions(id) where is_public = true;
+-- drop policy if exists "Anyone can read public sessions" on public.study_sessions;
+-- create policy "Anyone can read public sessions"
+--   on public.study_sessions for select
+--   using (is_public = true);

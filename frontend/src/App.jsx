@@ -190,13 +190,42 @@ export default function App() {
 
   // ---- Share URL parsing on mount ----
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shareId = params.get("share");
+
+    if (shareId) {
+      // Cloud share link: ?share=<uuid>
+      (async () => {
+        try {
+          const session = await loadSharedSession(shareId);
+          if (session) {
+            if (session.nodes?.length) setNodes(session.nodes);
+            if (session.edges) setEdges(session.edges);
+            window.history.replaceState(null, "", window.location.pathname);
+            toast.success(`Loaded shared lesson: "${session.title}"`, {
+              duration: 4000,
+              description: "Sign in to save your own copy.",
+            });
+          } else {
+            toast.error("Shared lesson not found", {
+              description: "The link may have expired or been made private.",
+            });
+          }
+        } catch (err) {
+          console.error("Failed to load shared session:", err);
+          toast.error("Failed to load shared lesson.");
+        }
+      })();
+      return;
+    }
+
     if (window.location.hash.startsWith("#s=")) {
+      // Legacy hash-based share (guests / large canvases)
       try {
         const payload = window.location.hash.slice(3);
         const decoded = decodeShareHash(payload);
         if (decoded?.nodes?.length) setNodes(decoded.nodes);
         if (decoded?.edges) setEdges(decoded.edges);
-        // Strip hash cleanly without refreshing
         window.history.replaceState(null, "", window.location.pathname + window.location.search);
         toast.success("Shared canvas loaded!", { duration: 3000 });
       } catch (err) {
@@ -204,6 +233,8 @@ export default function App() {
         console.error("Share decode error:", err);
       }
     }
+  // loadSharedSession is stable (useCallback with no deps); intentionally omitted to avoid re-runs on every render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setNodes, setEdges]);
 
   // ---- React Flow callbacks ----
@@ -371,6 +402,8 @@ export default function App() {
     triggerIdleAutoSave,
     resolveConflictReload,
     resolveConflictSaveCopy,
+    shareSession,
+    loadSharedSession,
   } = useSessions({
     user,
     nodes,
@@ -869,13 +902,36 @@ export default function App() {
   const handleShare = useCallback(async () => {
     if (nodes.length <= 1) return;
     try {
+      // ── Cloud share (logged-in + saved session) ──
+      if (user && activeSessionId) {
+        const cloudUrl = await shareSession(activeSessionId);
+        if (cloudUrl) {
+          try {
+            await navigator.clipboard.writeText(cloudUrl);
+          } catch {
+            // Clipboard blocked — show in toast so user can copy manually
+          }
+          track("lesson_shared", { method: "cloud_link" });
+          toast.success("Share link copied!", {
+            description: cloudUrl,
+            duration: 6000,
+            action: {
+              label: "Copy again",
+              onClick: () => navigator.clipboard.writeText(cloudUrl).catch(() => {}),
+            },
+          });
+          return;
+        }
+      }
+
+      // ── Legacy hash-based share (guest or no saved session yet) ──
       const b64 = encodeShareHash(nodes, edges);
       const url = `${window.location.origin}${window.location.pathname}#s=${b64}`;
       if (url.length > 4000) {
-        throw new Error("Canvas is too large to share via URL link. Try taking a snapshot instead.");
+        throw new Error("Canvas is too large to share via URL. Sign in and save your session first to get a short cloud link.");
       }
 
-      // Prefer native share with a PNG snapshot where supported
+      // Prefer native share with PNG on mobile
       try {
         const blob = await renderDiagramPng();
         const file = blob ? new File([blob], `dyna-learn-${Date.now()}.png`, { type: "image/png" }) : null;
@@ -886,18 +942,21 @@ export default function App() {
           return;
         }
       } catch (shareErr) {
-        // User dismissed the sheet or file share failed — fall through to link
         if (shareErr?.name === "AbortError") return;
       }
 
       await navigator.clipboard.writeText(url);
       track("lesson_shared", { method: "link" });
-      toast.success("Share link copied to clipboard!", { description: "Anyone with this link can continue the lesson." });
+      toast.success("Share link copied to clipboard!", {
+        description: user
+          ? "Save this session first for a shorter cloud link."
+          : "Sign in to get a permanent short link.",
+      });
     } catch (err) {
       console.error("Share failed", err);
       toast.error(err.message || "Failed to generate share link");
     }
-  }, [nodes, edges, renderDiagramPng]);
+  }, [user, activeSessionId, shareSession, nodes, edges, renderDiagramPng]);
 
   // ---- Retention Engine Handlers -----------------------------------------
   const handleSaveWorkspace = useCallback(() => {
