@@ -34,6 +34,7 @@ import { useAuth } from "./hooks/useAuth.js";
 import { useTTS } from "./hooks/useTTS.js";
 import { useImageAttachment } from "./hooks/useImageAttachment.js";
 import { useSessions } from "./hooks/useSessions.js";
+import { useSRS } from "./hooks/useSRS.js";
 import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
 import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
@@ -378,6 +379,9 @@ export default function App() {
     onRestoreSession: handleRestoreSession,
   });
 
+  // ---- SRS (Spaced Repetition) — cloud for logged-in, local for guests ----
+  const { dueReviews, logCard, reviewCard, refreshQueue } = useSRS({ user });
+
   // ---- Node/edge formatting ----
   const inferIcon = (label = "") => {
     const l = label.toLowerCase();
@@ -493,15 +497,15 @@ export default function App() {
               const updatedData = { ...existing.data, ...n.data };
               map.set(n.id, { ...existing, data: updatedData });
               
-              // Log confusion to SRS
+              // Log confusion to SRS (cloud for logged-in, local for guests)
               if (n.data?.highlight && updatedData.label) {
-                logHighlightToSRS(n.id, updatedData.label);
+                logCard(n.id, updatedData.label);
               }
             }
             else {
               map.set(n.id, n);
               if (n.data?.highlight && n.data?.label) {
-                logHighlightToSRS(n.id, n.data.label);
+                logCard(n.id, n.data.label);
               }
             }
           });
@@ -940,11 +944,11 @@ export default function App() {
   const handleQuizComplete = useCallback((passed, _turnIdx) => {
     track("quiz_completed", { passed: !!passed });
     if (activeReviewId) {
-      updateSRSItem(activeReviewId, passed);
+      reviewCard(activeReviewId, passed);
       setActiveReviewId(null);
       toast.success(passed ? "Great job! Review interval increased." : "Keep studying! Review scheduled for tomorrow.", { icon: passed ? <Trophy size={14} className="text-violet-600" /> : <Dumbbell size={14} className="text-violet-600" /> });
     }
-  }, [activeReviewId]);
+  }, [activeReviewId, reviewCard]);
 
   const handleSelectTopic = useCallback((topic) => {
     setTopicExplorerOpen(false);
@@ -1734,6 +1738,9 @@ export default function App() {
             onLoadSnapshot={handleLoadSnapshot}
             onStartReview={handleStartReview}
             onPracticeCards={handleStartPractice}
+            user={user}
+            dueReviews={dueReviews}
+            onRefreshQueue={refreshQueue}
           />
         </Suspense>
       )}

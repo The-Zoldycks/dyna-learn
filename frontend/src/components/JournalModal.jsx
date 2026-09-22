@@ -1,13 +1,26 @@
 import { useState } from "react";
-import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight, BarChart3, Search, RotateCw } from "lucide-react";
-import { getStreak, getSnapshots, getDueReviews, deleteSnapshot } from "../utils/storage";
+import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight, BarChart3, Search, RotateCw, Cloud, CloudOff } from "lucide-react";
+import { getStreak, getSnapshots, deleteSnapshot } from "../utils/storage";
 import { getStats } from "../utils/analytics";
 import { useFocusTrap } from "../hooks/useFocusTrap.js";
 
-export default function JournalModal({ open, onClose, onLoadSnapshot, onStartReview, onPracticeCards }) {
+export default function JournalModal({
+  open,
+  onClose,
+  onLoadSnapshot,
+  onStartReview,
+  onPracticeCards,
+  // New props from useSRS — already resolved (cloud or local)
+  user = null,
+  dueReviews = null,       // if provided, use this instead of reading localStorage
+  onRefreshQueue = null,
+}) {
   const [streak] = useState(() => getStreak());
   const [snapshots, setSnapshots] = useState(() => getSnapshots());
-  const [dueReviews] = useState(() => getDueReviews());
+
+  // Use prop-provided dueReviews (from useSRS) if available, otherwise fall back to local
+  const resolvedDueReviews = dueReviews ?? [];
+
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [stats] = useState(() => getStats());
   const [searchQuery, setSearchQuery] = useState("");
@@ -16,7 +29,7 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
 
   const query = searchQuery.trim().toLowerCase();
   const filteredSnapshots = snapshots.filter((s) => !query || s.title?.toLowerCase().includes(query));
-  const filteredReviews = dueReviews.filter((r) => !query || r.label?.toLowerCase().includes(query));
+  const filteredReviews = resolvedDueReviews.filter((r) => !query || r.label?.toLowerCase().includes(query));
   const hasNoResults = query && filteredSnapshots.length === 0 && filteredReviews.length === 0;
 
   if (!open) return null;
@@ -41,9 +54,21 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
             <BookOpen size={18} className="text-violet-600" aria-hidden="true" />
             Learning Journal
           </div>
-          <button onClick={onClose} aria-label="Close learning journal" className="p-1.5 rounded-full hover:bg-slate-200 text-slate-500 transition">
-            <X size={18} aria-hidden="true" />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Cloud sync badge */}
+            {user ? (
+              <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                <Cloud size={10} /> Cloud synced
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full" title="Sign in to sync flashcards across devices">
+                <CloudOff size={10} /> Local only
+              </span>
+            )}
+            <button onClick={onClose} aria-label="Close learning journal" className="p-1.5 rounded-full hover:bg-slate-200 text-slate-500 transition">
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
         </div>
 
         {/* Search & Filter Bar */}
@@ -112,7 +137,7 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
                 </div>
                 <div>
                   <p className="text-xs font-medium text-violet-600 uppercase tracking-wide">Reviews Due</p>
-                  <p className="text-2xl font-bold text-violet-700">{dueReviews.length}</p>
+                  <p className="text-2xl font-bold text-violet-700">{resolvedDueReviews.length}</p>
                 </div>
               </div>
             </div>
@@ -163,6 +188,15 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
                 <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-violet-500" />
                   Concepts to Review ({filteredReviews.length})
+                  {user && onRefreshQueue && (
+                    <button
+                      onClick={onRefreshQueue}
+                      title="Refresh from cloud"
+                      className="ml-1 p-0.5 rounded text-slate-400 hover:text-violet-600 transition"
+                    >
+                      <RotateCw size={11} />
+                    </button>
+                  )}
                 </h3>
                 {onPracticeCards && (
                   <button
@@ -192,17 +226,33 @@ export default function JournalModal({ open, onClose, onLoadSnapshot, onStartRev
             </div>
           )}
 
-          {/* Saved Snapshots */}
+          {/* Reviews empty state */}
+          {(activeTab === "reviews") && filteredReviews.length === 0 && !searchQuery && (
+            <p className="text-xs text-slate-500 italic bg-slate-50 border border-slate-100 p-4 rounded-lg">
+              {user
+                ? "No reviews due yet. Keep learning and the AI will schedule concepts for you automatically!"
+                : "No reviews due. Ask the tutor questions and highlighted concepts will appear here."}
+            </p>
+          )}
+
+          {/* Saved Snapshots (guest only — logged-in users have the Sessions drawer) */}
           {(activeTab === "all" || activeTab === "lessons") && (
             <div>
               <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-slate-300" />
-                Saved Lessons ({filteredSnapshots.length})
+                {user ? "Locally Saved Lessons" : `Saved Lessons (${filteredSnapshots.length})`}
+                {user && (
+                  <span className="text-[10px] font-normal text-slate-400 ml-1">
+                    — Cloud sessions are in the Sessions drawer (top right)
+                  </span>
+                )}
               </h3>
               {filteredSnapshots.length === 0 ? (
                 !searchQuery && (
                   <p className="text-xs text-slate-500 italic bg-slate-50 border border-slate-100 p-4 rounded-lg">
-                    No saved lessons yet. Click "Save" in the top header to capture a canvas snapshot.
+                    {user
+                      ? "No local snapshots. Your sessions are saved to the cloud — open the Sessions drawer to access them."
+                      : "No saved lessons yet. Click \"Save\" in the top header to capture a canvas snapshot."}
                   </p>
                 )
               ) : (
