@@ -121,6 +121,22 @@ export function useAuth() {
     toast.info("Signed out", { description: "Switched to local Guest Mode." });
   }, [isConfigured]);
 
+  const requestPasswordReset = useCallback(async (email) => {
+    if (!isConfigured) {
+      toast.info("Supabase is not configured yet. Cannot send reset email.");
+      return;
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email, `${window.location.origin}?reset=1`);
+    if (error) {
+      toast.error("Password reset failed", { description: error.message });
+      throw error;
+    }
+    toast.success("Password reset email sent!", {
+      description: "Check your inbox for a link to reset your password.",
+      duration: 6000,
+    });
+  }, [isConfigured]);
+
   // Initials generator for fallback avatar
   const initials = getInitials(profile?.display_name || user?.user_metadata?.full_name || user?.email || "Guest");
 
@@ -134,6 +150,7 @@ export function useAuth() {
     loginWithPassword,
     signUpWithPassword,
     logout,
+    requestPasswordReset,
     refreshProfile: () => (user ? loadProfile(user.id) : null),
   };
 }

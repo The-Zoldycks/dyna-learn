@@ -173,6 +173,7 @@ export default function App() {
     loginWithPassword,
     signUpWithPassword,
     logout,
+    requestPasswordReset,
   } = useAuth();
 
   const recognitionRef = useRef(null);
@@ -1768,6 +1769,7 @@ export default function App() {
             onLoginWithGoogle={loginWithGoogle}
             onLoginWithPassword={loginWithPassword}
             onSignUpWithPassword={signUpWithPassword}
+            onRequestPasswordReset={requestPasswordReset}
           />
         </Suspense>
       )}

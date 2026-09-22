@@ -322,6 +322,26 @@ export const auth = {
     return { error: null };
   },
 
+  async resetPasswordForEmail(email, redirectTo = window.location.origin) {
+    if (!isSupabaseConfigured()) {
+      return { error: new Error("Supabase is not configured.") };
+    }
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
+        body: JSON.stringify({ email, gotrue_meta_security: {}, redirectTo }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        return { error: new Error(json.error_description || json.msg || json.message || "Failed to send reset email") };
+      }
+      return { error: null };
+    } catch (err) {
+      return { error: err };
+    }
+  },
+
   onAuthStateChange(callback) {
     authListeners.add(callback);
     const currentSession = getStoredSession();
