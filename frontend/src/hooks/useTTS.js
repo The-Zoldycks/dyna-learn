@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { stripMarkdown } from "../utils/speechText";
 
 const SPEEDS = [1, 1.25, 1.5, 2];
 
@@ -130,15 +131,18 @@ export function useTTS(apiBase) {
   const speakText = useCallback(async (text) => {
     if (!text) return;
     setLastSpeech(text);
+    // Voice reads the rendered text — never raw markdown markers
+    const plain = stripMarkdown(text);
+    if (!plain) return;
     if (isEdgeVoice(selectedVoice)) {
-      const ok = await speakEdge(text);
+      const ok = await speakEdge(plain);
       if (ok) return;
       toast.info("Falling back to browser voice", {
         duration: 2500,
         description: "Edge neural unavailable — using offline voice.",
       });
     }
-    speakBrowser(text);
+    speakBrowser(plain);
   }, [selectedVoice, isEdgeVoice, speakEdge, speakBrowser]);
 
   const setAutoNarratePersisted = useCallback((val) => {
