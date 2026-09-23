@@ -62,7 +62,7 @@ export default function CustomNode({ id, data, selected }) {
         <button 
           onClick={(e) => {
             e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('ask-node', { detail: data.label }));
+            window.dispatchEvent(new CustomEvent('ask-node', { detail: { id, label: data.label } }));
           }}
           className="px-2.5 py-1 text-white rounded-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
         >
@@ -72,7 +72,7 @@ export default function CustomNode({ id, data, selected }) {
         <button 
           onClick={(e) => {
             e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('branch-node', { detail: data.label }));
+            window.dispatchEvent(new CustomEvent('branch-node', { detail: { id, label: data.label } }));
           }}
           className="px-2.5 py-1 text-white rounded-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
         >

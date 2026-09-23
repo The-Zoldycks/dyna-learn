@@ -5,13 +5,24 @@ export default function QuizCard({ quiz, onComplete }) {
   const [selectedAnswers, setSelectedAnswers] = useState({});
   const [showExplanations, setShowExplanations] = useState({});
 
+  const quizKey = JSON.stringify(quiz ?? null);
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [seenKey, setSeenKey] = useState(quizKey);
+  if (seenKey !== quizKey) {
+    setSeenKey(quizKey);
+    setSelectedAnswers({});
+    setShowExplanations({});
+  }
+
   const validQuestions = Array.isArray(quiz?.questions)
     ? quiz.questions.filter(
         (q) =>
           q &&
           typeof q.question === "string" &&
+          q.question.trim().length > 0 &&
           Array.isArray(q.options) &&
           q.options.length > 0 &&
+          q.options.every((o) => typeof o === "string" && o.trim().length > 0) &&
           Number.isInteger(q.correct_index) &&
           q.correct_index >= 0 &&
           q.correct_index < q.options.length

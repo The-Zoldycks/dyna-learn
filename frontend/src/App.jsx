@@ -375,7 +375,9 @@ export default function App() {
   // ---- Custom Node Toolbar 'Ask AI', 'Branch out', and 'Delete' listeners ----
   useEffect(() => {
     const handleAskNode = (e) => {
-      setQuestion(`Explain "${e.detail}" in more detail.`);
+      const { id, label } = e.detail || {};
+      if (id) setSelectedNodeId(id);
+      setQuestion(`Explain "${label}" in more detail.`);
       setMobileTab("chat"); // ensure we switch to chat on mobile
       setTimeout(() => {
         const textarea = document.querySelector("textarea");
@@ -383,7 +385,9 @@ export default function App() {
       }, 50);
     };
     const handleBranchNode = (e) => {
-      setQuestion(`Break down "${e.detail}" into sub-concepts and expand the diagram.`);
+      const { id, label } = e.detail || {};
+      if (id) setSelectedNodeId(id);
+      setQuestion(`Break down "${label}" into sub-concepts and expand the diagram.`);
       setMobileTab("chat");
       setTimeout(() => {
         const textarea = document.querySelector("textarea");
@@ -661,6 +665,35 @@ export default function App() {
         break;
       }
       case "none":
+        // Contract: no diagram change — ignore stray nodes/edges.
+        return;
+      case "quiz":
+        // Quiz renders from the root quiz object; never mutates the canvas.
+        return;
+      case "update": {
+        // Legacy alias for update_nodes: merge data into existing nodes only.
+        const ids = new Set(curNodes.map((n) => n.id));
+        const known = formattedNodes.filter((n) => ids.has(n.id));
+        if (!known.length) return;
+        setNodes((prev) => {
+          const map = new Map(prev.map((n) => [n.id, n]));
+          known.forEach((n) => {
+            const existing = map.get(n.id);
+            if (existing) map.set(n.id, { ...existing, data: { ...existing.data, ...n.data } });
+          });
+          return Array.from(map.values());
+        });
+        break;
+      }
+      case "delete": {
+        // Legacy alias: remove the listed nodes (and their incident edges).
+        const removeIds = new Set(formattedNodes.map((n) => n.id));
+        if (!removeIds.size) return;
+        setNodes((prev) => prev.filter((n) => !removeIds.has(n.id)));
+        setEdges((prev) => prev.filter((e) => !removeIds.has(e.source) && !removeIds.has(e.target)));
+        setSelectedNodeId((cur) => (removeIds.has(cur) ? null : cur));
+        break;
+      }
       default:
         if (formattedNodes.length || formattedEdges.length) {
           const ids = new Set(curNodes.map((n) => n.id));
@@ -688,7 +721,10 @@ export default function App() {
       !update ||
       update.action === "update_nodes" ||
       update.action === "clear_canvas" ||
-      update.action === "none"
+      update.action === "none" ||
+      update.action === "quiz" ||
+      update.action === "update" ||
+      update.action === "delete"
     ) {
       return applyDiagramUpdate(update);
     }
@@ -718,7 +754,7 @@ export default function App() {
   }, [applyDiagramUpdate, formatNodes, formatEdges, triggerFitView]);
 
   // ---- Main tutor call ----
-  const executeTutor = useCallback(async (payload, retryLabel) => {
+  const executeTutor = useCallback(async (payload, _retryLabel) => {
     setLoading(true); lastPayloadRef.current = payload;
     try {
       const res = await fetch(`${API_BASE}/api/tutor`, {
@@ -770,7 +806,7 @@ export default function App() {
       if (diagram_update && diagram_update.action !== "quiz") {
         applyDiagramUpdateStable(diagram_update);
       }
-      if (retryLabel) toast.dismiss();
+      toast.dismiss("tutor-error");
       track("question_asked", { hasImage: !!payload.image, nodeSelected: !!payload.selectedNodeId });
       triggerIdleAutoSave();
       updateStreakOnLoad();
@@ -797,6 +833,7 @@ export default function App() {
               : err.message || "Failed to fetch tutor response";
 
       toast.error(isBudget ? "Budget exhausted" : isRateLimit ? "Rate limit hit" : isNetwork || isTimeout ? "Connection problem" : "Tutor unavailable", {
+        id: "tutor-error",
         description,
         duration: Infinity,
         action: {
@@ -806,7 +843,7 @@ export default function App() {
             executeTutor(retryPayload, true);
           },
         },
-        cancel: { label: "Dismiss", onClick: () => toast.dismiss() },
+        cancel: { label: "Dismiss", onClick: () => toast.dismiss("tutor-error") },
       });
       return false;
     } finally { setLoading(false); }
@@ -1075,11 +1112,20 @@ export default function App() {
   }, [setNodes, setEdges, triggerFitView]);
 
   const handleStartReview = useCallback((srsItem) => {
+    if (loading || isOffline) {
+      if (isOffline) toast.error("You're offline", { description: "Reconnect to start the review quiz." });
+      return;
+    }
     setJournalOpen(false);
     setActiveReviewId(srsItem.id);
     const q = `I need to review the concept: "${srsItem.label}". Please quiz me on it using the 'quiz' action. Ensure it is multiple choice.`;
-    executeTutor({ studentQuestion: q, nodes, edges }, true);
-  }, [executeTutor, nodes, edges]);
+    executeTutor({
+      studentQuestion: q,
+      canvasState: { nodes, edges },
+      chatHistory: chatHistory.slice(-6),
+      selectedNodeId: null,
+    }, true);
+  }, [executeTutor, nodes, edges, chatHistory, loading, isOffline]);
 
   const handleQuizComplete = useCallback((passed, _turnIdx) => {
     track("quiz_completed", { passed: !!passed });
@@ -1091,6 +1137,10 @@ export default function App() {
   }, [activeReviewId, reviewCard]);
 
   const handleSelectTopic = useCallback((topic) => {
+    if (loading || isOffline) {
+      if (isOffline) toast.error("You're offline", { description: "Reconnect to load this topic's lesson." });
+      return;
+    }
     setTopicExplorerOpen(false);
     const layouted = getLayoutedElements(topic.nodes, topic.edges);
     setNodes(layouted.nodes);
@@ -1101,9 +1151,14 @@ export default function App() {
     toast.success(`Loaded "${topic.title}"`, { description: "Tutor is starting the lesson..." });
     setTimeout(() => {
       triggerFitView();
-      executeTutor({ studentQuestion: topic.prompt, nodes: layouted.nodes, edges: layouted.edges });
+      executeTutor({
+        studentQuestion: topic.prompt,
+        canvasState: { nodes: layouted.nodes, edges: layouted.edges },
+        chatHistory: [],
+        selectedNodeId: null,
+      });
     }, 250);
-  }, [setNodes, setEdges, triggerFitView, executeTutor]);
+  }, [setNodes, setEdges, triggerFitView, executeTutor, loading, isOffline]);
 
   const handleStartPractice = useCallback((items) => {
     setJournalOpen(false);
@@ -1127,10 +1182,12 @@ export default function App() {
     return chatHistory
       .map((turn, originalIdx) => ({ turn, originalIdx }))
       .filter(({ turn }) => {
-        const matchText = (turn.text || "").toLowerCase().includes(q);
-        const matchQuiz = (turn.quiz?.question || "").toLowerCase().includes(q) ||
-          (turn.quiz?.options || []).some((opt) => opt.toLowerCase().includes(q));
-        return matchText || matchQuiz;
+      const matchText = (turn.text || "").toLowerCase().includes(q);
+      const matchQuiz = (turn.quiz?.questions || []).some((qq) =>
+        (qq.question || "").toLowerCase().includes(q) ||
+        (qq.options || []).some((opt) => String(opt).toLowerCase().includes(q))
+      );
+      return matchText || matchQuiz;
       });
   }, [chatHistory, chatSearchQuery]);
 
@@ -1640,7 +1697,7 @@ export default function App() {
                           {turn.role === "model" ? (
                             <>
                               <SimpleMarkdown text={displayText} className="mt-1 text-[13px] leading-relaxed" />
-                              {turn.quiz && <QuizCard quiz={turn.quiz} onComplete={(passed) => handleQuizComplete(passed, originalIdx)} />}
+                              {turn.quiz && <QuizCard key={`quiz-${originalIdx}-${turn.quiz.questions?.length ?? 0}`} quiz={turn.quiz} onComplete={(passed) => handleQuizComplete(passed, originalIdx)} />}
                             </>
                           ) : (
                             <div className="mt-1">
