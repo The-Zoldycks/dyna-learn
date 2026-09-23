@@ -530,7 +530,7 @@ export default function App() {
 
   const formatNodes = useCallback((apiNodes) =>
     (apiNodes || []).map((n, idx) => ({
-      id: n.id || `node-${Date.now()}-${idx}`,
+      id: n.id || `node-${crypto.randomUUID()}-${idx}`,
       position: n.position || { x: 0, y: 0 },
       data: {
         label: n.label || n.data?.label || "Concept",
@@ -544,7 +544,7 @@ export default function App() {
 
   const formatEdges = useCallback((apiEdges) =>
     (apiEdges || []).map((e, idx) => ({
-      id: e.id || `edge-${Date.now()}-${idx}`,
+      id: e.id || `edge-${crypto.randomUUID()}-${idx}`,
       source: e.source,
       target: e.target,
       label: e.label || "",
@@ -1901,7 +1901,9 @@ export default function App() {
             open={practiceModalOpen}
             onClose={() => setPracticeModalOpen(false)}
             items={practiceItems}
+            onScore={reviewCard}
             onFinish={() => {
+              refreshQueue();
               toast.success("Great job! Spaced repetition intervals updated.", { icon: <Trophy size={14} className="text-violet-600" /> });
             }}
           />

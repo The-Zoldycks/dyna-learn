@@ -51,7 +51,7 @@ export function useTTS(apiBase) {
     fetch(`${apiBase}/api/tts/voices`, { signal: ctrl.signal })
       .then((r) => r.json())
       .then((data) => { if (data.voices?.length) setEdgeVoices(data.voices); })
-      .catch(() => {});
+      .catch((err) => { if (err?.name !== "AbortError") console.warn("Edge voices unavailable, using browser voices:", err.message); });
 
     const loadVoices = () => {
       const voices = window.speechSynthesis?.getVoices() || [];

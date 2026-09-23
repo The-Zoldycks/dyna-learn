@@ -139,12 +139,11 @@ app.use(cors({
   maxAge: 86400,
 }));
 
-app.use(express.json({ limit: '8mb' }));
-
 // Behind Render's proxy — without this, express-rate-limit counts the proxy IP as one user
 app.set('trust proxy', 1);
 
-// Per-IP rate limiting — second layer behind CORS so a hotlinked key can't burn Gemini quota
+// Per-IP rate limiting — mounted BEFORE express.json so throttled clients
+// are rejected without paying the cost of parsing up to 8mb of JSON
 const tutorLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 20,
@@ -163,6 +162,8 @@ const ttsLimiter = rateLimit({
 });
 app.use("/api/tutor", tutorLimiter);
 app.use("/api/tts", ttsLimiter);
+
+app.use(express.json({ limit: '8mb' }));
 
 // Initialize Gemini client
 const ai = new GoogleGenAI({
@@ -545,7 +546,8 @@ Rules:
 });
 
 // --- Edge TTS self-hosted (in-process, no fetch, same as Toolbox-backend) ---
-const EDGE_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+// Public Bing client token — overridable via env so rotation doesn't need a code change
+const EDGE_TOKEN = process.env.EDGE_TOKEN || "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const EDGE_VOICE_LIST_URL = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=${EDGE_TOKEN}`;
 
 // Fallback voices when Bing is unreachable — prevents ReferenceError on voices endpoint
@@ -690,6 +692,12 @@ function shutdown(signal) {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+// Crash fast on unknown state — Render restarts the service cleanly
 process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled Rejection:", reason);
+  console.error("Unhandled Rejection — exiting:", reason);
+  process.exit(1);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception — exiting:", err);
+  process.exit(1);
 });

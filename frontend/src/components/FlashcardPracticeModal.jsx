@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { X, RotateCw, CheckCircle2, Sparkles, BookOpen, ArrowRight } from "lucide-react";
 import { updateSRSItem } from "../utils/storage.js";
 
-function FlashcardPracticeContent({ onClose, items = [], onFinish }) {
+function FlashcardPracticeContent({ onClose, items = [], onFinish, onScore }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [stats, setStats] = useState({ again: 0, good: 0, easy: 0 });
@@ -14,10 +14,11 @@ function FlashcardPracticeContent({ onClose, items = [], onFinish }) {
   const handleScore = useCallback((rating) => {
     if (!currentCard) return;
 
-    // Update SRS item in storage
+    // Update SRS item — cloud-aware when onScore is provided, local fallback otherwise
     const passed = rating !== "again";
     if (currentCard.id) {
-      updateSRSItem(currentCard.id, passed);
+      if (onScore) onScore(currentCard.id, passed);
+      else updateSRSItem(currentCard.id, passed);
     }
 
     setStats((prev) => ({ ...prev, [rating]: prev[rating] + 1 }));
@@ -29,7 +30,7 @@ function FlashcardPracticeContent({ onClose, items = [], onFinish }) {
       setIsComplete(true);
       onFinish?.();
     }
-  }, [currentCard, currentIndex, items.length, onFinish]);
+  }, [currentCard, currentIndex, items.length, onFinish, onScore]);
 
   // Keyboard navigation: Space to flip, 1/2/3 to score, Esc to close
   useEffect(() => {
@@ -239,7 +240,7 @@ function FlashcardPracticeContent({ onClose, items = [], onFinish }) {
   );
 }
 
-export default function FlashcardPracticeModal({ open, onClose, items = [], onFinish }) {
+export default function FlashcardPracticeModal({ open, onClose, items = [], onFinish, onScore }) {
   if (!open) return null;
   return (
     <FlashcardPracticeContent
@@ -247,6 +248,7 @@ export default function FlashcardPracticeModal({ open, onClose, items = [], onFi
       onClose={onClose}
       items={items}
       onFinish={onFinish}
+      onScore={onScore}
     />
   );
 }

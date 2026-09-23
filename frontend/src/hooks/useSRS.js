@@ -124,7 +124,7 @@ export function useSRS({ user }) {
             .eq("id", existing.id);
         } else {
           const reviewIn12h = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
-          await supabase.from("srs_cards").insert({
+          const { error: insertError } = await supabase.from("srs_cards").insert({
             user_id: user.id,
             node_id: nodeId,
             label,
@@ -133,6 +133,26 @@ export function useSRS({ user }) {
             repetitions: 0,
             next_review_at: reviewIn12h,
           });
+          if (insertError) {
+            const isDuplicate = insertError.details?.code === "23505" || /duplicate|unique/i.test(insertError.message || "");
+            if (isDuplicate) {
+              // Lost the select→insert race — re-fetch and reset the winner
+              const { data: winner } = await supabase
+                .from("srs_cards")
+                .select("id")
+                .eq("user_id", user.id)
+                .eq("label", label)
+                .single();
+              if (winner?.id) {
+                await supabase
+                  .from("srs_cards")
+                  .update({ interval_days: 0, next_review_at: new Date().toISOString() })
+                  .eq("id", winner.id);
+              }
+            } else {
+              throw insertError;
+            }
+          }
         }
         fetchQueue();
       } catch (err) {

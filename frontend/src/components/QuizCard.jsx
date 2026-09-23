@@ -41,21 +41,21 @@ export default function QuizCard({ quiz, onComplete }) {
   };
 
   return (
-    <div className="mt-4 flex flex-col gap-4 border-t border-violet-200/50 pt-4" role="radiogroup" aria-label="Quiz questions">
+    <div className="mt-4 flex flex-col gap-4 border-t border-violet-200/50 pt-4" aria-label="Quiz questions">
       {validQuestions.map((q, qIdx) => {
         const hasAnswered = selectedAnswers[qIdx] !== undefined;
         const isCorrect = selectedAnswers[qIdx] === q.correct_index;
 
         return (
           <div key={qIdx} className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
-            <h4 className="text-xs font-semibold text-slate-800 mb-2 leading-relaxed">
+            <h4 id={`quiz-q-${qIdx}`} className="text-xs font-semibold text-slate-800 mb-2 leading-relaxed">
               {qIdx + 1}. {q.question}
             </h4>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5" role="radiogroup" aria-labelledby={`quiz-q-${qIdx}`}>
               {q.options.map((opt, optIdx) => {
                 const isSelected = selectedAnswers[qIdx] === optIdx;
                 const isActuallyCorrect = q.correct_index === optIdx;
-                
+
                 let btnStyle = "border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300";
                 
                 if (hasAnswered) {
@@ -69,27 +69,21 @@ export default function QuizCard({ quiz, onComplete }) {
                 }
 
                 return (
-                  <div
+                  <button
                     key={optIdx}
+                    type="button"
                     role="radio"
                     aria-checked={isSelected}
                     aria-label={`Option ${String.fromCharCode(65 + optIdx)}: ${opt}${hasAnswered ? (isActuallyCorrect ? " (correct answer)" : isSelected ? " (your answer, incorrect)" : "") : ""}`}
-                    className={`text-left text-xs px-3 py-2 rounded-md border transition-colors cursor-pointer ${btnStyle}`}
+                    className={`w-full text-left text-xs px-3 py-2 rounded-md border transition-colors bg-transparent ${hasAnswered ? "cursor-default" : "cursor-pointer"} ${btnStyle}`}
                     onClick={() => handleSelect(qIdx, optIdx)}
-                    aria-disabled={hasAnswered}
-                    tabIndex={hasAnswered ? -1 : 0}
-                    onKeyDown={(e) => {
-                      if (!hasAnswered && (e.key === 'Enter' || e.key === ' ')) {
-                        e.preventDefault();
-                        handleSelect(qIdx, optIdx);
-                      }
-                    }}
+                    disabled={hasAnswered}
                   >
-                    <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-2">
                       <span className="shrink-0 font-mono text-[10px] opacity-50">{String.fromCharCode(65 + optIdx)}</span>
                       <span>{opt}</span>
-                    </div>
-                  </div>
+                    </span>
+                  </button>
                 );
               })}
             </div>

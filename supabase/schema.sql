@@ -80,8 +80,14 @@ create policy "Users can manage own srs cards"
   with check (auth.uid() = user_id);
 
 -- Trigger: auto-create public.profiles entry whenever a user signs up in auth.users
+-- NOTE: search_path is pinned because SECURITY DEFINER functions are vulnerable
+-- to search-path hijacking without it.
 create or replace function public.handle_new_user()
-returns trigger as $$
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
 begin
   insert into public.profiles (id, email, display_name, avatar_url)
   values (
@@ -93,12 +99,48 @@ begin
   on conflict (id) do nothing;
   return new;
 end;
-$$ language plpgsql security definer;
+$$;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ==============================================================================
+-- Hardening (safe to run on existing databases — all statements are idempotent)
+-- ==============================================================================
+-- Session version must stay positive (OCC relies on it)
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'study_sessions_version_check') then
+    alter table public.study_sessions
+      add constraint study_sessions_version_check check (version >= 1);
+  end if;
+end $$;
+
+-- Speed up SRS lookups by session
+create index if not exists idx_srs_session on public.srs_cards(session_id);
+
+-- Auto-touch updated_at on writes (backend also sets it explicitly; trigger is the backstop)
+create or replace function public.touch_updated_at()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_touch_sessions on public.study_sessions;
+create trigger trg_touch_sessions
+  before update on public.study_sessions
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_touch_srs on public.srs_cards;
+create trigger trg_touch_srs
+  before update on public.srs_cards
+  for each row execute function public.touch_updated_at();
 
 -- ==============================================================================
 -- Migration: add is_public column if upgrading an existing database

@@ -360,7 +360,7 @@ export const auth = {
       fetch(`${SUPABASE_URL}/auth/v1/logout`, {
         method: "POST",
         headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}` },
-      }).catch(() => {});
+      }).catch((err) => console.warn("Server logout failed (local session cleared anyway):", err.message));
     }
     if (refreshTimer) clearTimeout(refreshTimer);
     setStoredSession(null);
