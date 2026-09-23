@@ -19,8 +19,9 @@ export default class ErrorBoundary extends React.Component {
     try {
       sessionStorage.clear();
       // Canvas graph persists in localStorage too — clear both stores
-      // or a corrupt graph reloads and crashes again.
-      ["dyna-nodes", "dyna-edges"].forEach((k) => {
+      // or a corrupt graph reloads and crashes again. Chat/SRS/offline
+      // queue go too so no poisoned state survives the reset.
+      ["dyna-nodes", "dyna-edges", "dyna-chat", "dyna-srs", "dyna_offline_sessions_queue"].forEach((k) => {
         localStorage.removeItem(k);
         sessionStorage.removeItem(k);
       });

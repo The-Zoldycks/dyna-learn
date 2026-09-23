@@ -14,11 +14,11 @@ function FlashcardPracticeContent({ onClose, items = [], onFinish, onScore }) {
   const handleScore = useCallback((rating) => {
     if (!currentCard) return;
 
-    // Update SRS item — cloud-aware when onScore is provided, local fallback otherwise
-    const passed = rating !== "again";
+    // Update SRS item — cloud-aware when onScore is provided, local fallback otherwise.
+    // Pass the full rating so easy earns bonus ease.
     if (currentCard.id) {
-      if (onScore) onScore(currentCard.id, passed);
-      else updateSRSItem(currentCard.id, passed);
+      if (onScore) onScore(currentCard.id, rating);
+      else updateSRSItem(currentCard.id, rating !== "again");
     }
 
     setStats((prev) => ({ ...prev, [rating]: prev[rating] + 1 }));

@@ -234,12 +234,16 @@ export default function App() {
 
   // Streak increments only on learning (first successful tutor response per day), not on page load
 
-  // Detect password recovery link (?reset=1 or hash type=recovery) and open reset modal
+  // Detect password recovery link (?reset=1 or hash type=recovery) and open reset modal.
+  // The query/hash is stripped so a reload can't reopen the modal.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const hash = window.location.hash;
     const hasReset = params.get("reset") === "1" || hash.includes("type=recovery") || window.location.search.includes("type=recovery") || (hash.includes("access_token") && hash.includes("recovery"));
     if (hasReset) {
+      params.delete("reset");
+      const qs = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
       setAuthModalMode("reset");
       setAuthModalOpen(true);
     }
@@ -455,6 +459,7 @@ export default function App() {
     const goOnline = () => {
       setIsOffline(false);
       toast.dismiss("offline-toast");
+      toast.dismiss("backend-unreachable");
       toast.success("Back online!", { description: "You're reconnected. Good to go.", duration: 3000 });
     };
     window.addEventListener("offline", goOffline);
@@ -842,6 +847,16 @@ export default function App() {
       const isTimeout = err.name === "TimeoutError" || err.name === "AbortError" || code === "TUTOR_TIMEOUT";
       const isNetwork =
         err instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(err.message || "");
+      // Backend unreachable while OS reports online (captive portal, Render down):
+      // surface the offline banner state so the whole UI reflects it.
+      if ((isNetwork || isTimeout) && navigator.onLine) {
+        setIsOffline(true);
+        toast.warning("Backend unreachable", {
+          id: "backend-unreachable",
+          description: "The tutor server isn't responding. Canvas and journal still work — retry shortly.",
+          duration: 8000,
+        });
+      }
       const description = isBudget
         ? "Monthly budget exhausted — try again next month or contact the owner."
         : isRateLimit
@@ -867,12 +882,12 @@ export default function App() {
       });
       return false;
     } finally { setLoading(false); }
-  }, [speakText, setLastSpeech, applyDiagramUpdateStable, autoNarrate, triggerIdleAutoSave]);
+  }, [speakText, setLastSpeech, applyDiagramUpdateStable, autoNarrate, triggerIdleAutoSave, setIsOffline]);
 
   // ---- Form submit ----
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!question.trim() && !selectedImage || loading) return;
+    if ((!question.trim() && !selectedImage) || loading) return;
     if (isOffline) {
       toast.error("You're offline", { description: "Reconnect to the internet before asking the tutor." });
       return;
@@ -1308,7 +1323,7 @@ export default function App() {
               onClick={() => setShowMinimap((prev) => !prev)}
               title={showMinimap ? "Hide canvas minimap" : "Show canvas minimap"}
               aria-label="Toggle canvas minimap"
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-full border shadow-sm transition ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-full border shadow-sm transition min-h-[44px] ${
                 showMinimap
                   ? "bg-violet-600 text-white border-violet-600 shadow-xs"
                   : "bg-white/90 backdrop-blur border-slate-200 text-slate-700 hover:bg-slate-50"
@@ -1319,7 +1334,7 @@ export default function App() {
             <button
               onClick={handleShare}
               disabled={nodes.length <= 1}
-              className="flex items-center gap-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-full px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-full px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
             >
               <Network size={14} className="text-violet-600" /> Share
             </button>
@@ -1329,7 +1344,7 @@ export default function App() {
                 disabled={nodes.length <= 1}
                 title="Download diagram as PNG image"
                 aria-label="Download diagram as PNG"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px]"
               >
                 <Download size={13} className="text-violet-600" /> PNG
               </button>
@@ -1339,7 +1354,7 @@ export default function App() {
                 disabled={nodes.length <= 1}
                 title="Download diagram as scalable vector SVG"
                 aria-label="Download diagram as SVG"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px]"
               >
                 SVG
               </button>
@@ -1349,7 +1364,7 @@ export default function App() {
                 disabled={nodes.length <= 1}
                 title="Export concepts as Anki flashcards (.csv)"
                 aria-label="Export as Anki flashcards"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px]"
               >
                 Anki
               </button>
@@ -1384,7 +1399,7 @@ export default function App() {
         <div className="hidden sm:flex items-center gap-2">
         <button
           onClick={() => setSessionDrawerOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition min-h-[44px]"
           title="Open study workspaces"
         >
           <FolderKanban size={14} className="text-violet-600" />
@@ -1392,14 +1407,14 @@ export default function App() {
         </button>
         <button
           onClick={() => setTopicExplorerOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition min-h-[44px]"
         >
           <Compass size={14} className="text-violet-600" />
           <span className="hidden sm:inline">Topics</span>
         </button>
         <button
           onClick={() => setJournalOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition min-h-[44px]"
         >
           <BookOpen size={14} className="text-violet-600" />
           <span className="hidden sm:inline">Journal</span>
@@ -1408,7 +1423,7 @@ export default function App() {
         <button
           onClick={handleSaveWorkspace}
           disabled={nodes.length <= 1 || isSaving}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50 transition shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50 transition shadow-sm min-h-[44px] min-w-[44px] justify-center"
         >
           {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           <span className="hidden sm:inline">{isSaving ? "Saving…" : "Save"}</span>
@@ -1416,7 +1431,7 @@ export default function App() {
         <div className="hidden sm:flex items-center gap-2">
         <button
           onClick={() => setFluidOn((v) => !v)}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition border ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition border min-h-[44px] min-w-[44px] justify-center ${
             fluidOn
               ? "bg-violet-50 text-violet-700 border-violet-200/80 shadow-sm"
               : "text-slate-400 border-transparent hover:text-slate-600"
@@ -1428,7 +1443,7 @@ export default function App() {
         </button>
         <button
           onClick={handleClear}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 text-xs font-semibold transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 text-xs font-semibold transition min-h-[44px]"
           title="Clear Canvas"
         >
           <Trash2 size={14} /> <span className="hidden md:inline">Clear</span>
@@ -1493,7 +1508,7 @@ export default function App() {
                     setChatSearchOpen((prev) => !prev);
                     if (chatSearchOpen) setChatSearchQuery("");
                   }}
-                  className={`p-1.5 rounded-lg border transition ${
+                  className={`p-1.5 rounded-lg border transition min-h-[44px] min-w-[44px] flex items-center justify-center ${
                     chatSearchOpen
                       ? "bg-violet-100 text-violet-700 border-violet-300"
                       : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700"
@@ -1520,7 +1535,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setChatSearchQuery("")}
-                    className="absolute right-2 text-slate-400 hover:text-slate-600 text-xs p-0.5"
+                    className="absolute right-1 text-slate-400 hover:text-slate-600 text-xs p-0.5 min-h-[44px] min-w-[44px] flex items-center justify-center"
                     aria-label="Clear search"
                   >
                     ×
@@ -1552,7 +1567,7 @@ export default function App() {
                       setQuestion(`Explain "${selectedNodeLabel}" in depth and how it works.`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1"
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1 min-h-[44px]"
                   >
                     <Search size={11} className="text-violet-600" /> Deep dive
                   </button>
@@ -1562,7 +1577,7 @@ export default function App() {
                       setQuestion(`Break down "${selectedNodeLabel}" into sub-concepts on the canvas.`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1"
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1 min-h-[44px]"
                   >
                     <Sprout size={11} className="text-violet-600" /> Break down
                   </button>
@@ -1572,7 +1587,7 @@ export default function App() {
                       setQuestion(`Quiz me on "${selectedNodeLabel}".`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1"
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1 min-h-[44px]"
                   >
                     <Target size={11} className="text-violet-600" /> Quiz me
                   </button>
@@ -1582,7 +1597,7 @@ export default function App() {
                       setQuestion(`Give a real-world analogy or example for "${selectedNodeLabel}".`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1"
+                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1 min-h-[44px]"
                   >
                     <Lightbulb size={11} className="text-violet-600" /> Analogy
                   </button>
@@ -1801,7 +1816,7 @@ export default function App() {
                     type="button"
                     onClick={() => clearImage()}
                     aria-label="Remove attached image"
-                    className="absolute -top-2 -right-2 bg-white rounded-full text-slate-500 hover:text-red-600 transition"
+                    className="absolute -top-2 -right-2 bg-white rounded-full text-slate-500 hover:text-red-600 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
                   >
                     <XCircle size={16} className="fill-white" />
                   </button>

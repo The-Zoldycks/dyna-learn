@@ -4,9 +4,30 @@ import './index.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { Toaster, toast } from 'sonner'
+import { registerSW } from 'virtual:pwa-register'
 
-// Surface async failures that escape component error boundaries
-if (typeof window !== "undefined") {
+// autoUpdate installs silently — tell the user a new version is ready so
+// they reload deliberately instead of running stale mid-lesson.
+if (typeof window !== "undefined" && !window.__dyna_pwa__) {
+  window.__dyna_pwa__ = true;
+  try {
+    registerSW({
+      onOfflineReady() {},
+      onNeedRefresh() {
+        toast.info("A new version is available", {
+          description: "Reload to get the latest fixes. Your canvas is saved locally.",
+          duration: Infinity,
+          action: { label: "Reload", onClick: () => window.location.reload() },
+        });
+      },
+    });
+  } catch {}
+}
+
+// Surface async failures that escape component error boundaries.
+// Guarded so HMR re-evaluation doesn't stack duplicate listeners.
+if (typeof window !== "undefined" && !window.__dyna_rejection_handler__) {
+  window.__dyna_rejection_handler__ = true;
   window.addEventListener("unhandledrejection", (e) => {
     const reason = e.reason;
     if (reason?.name === "AbortError" || reason?.name === "TimeoutError") return;
