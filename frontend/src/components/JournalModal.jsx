@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Flame, BookOpen, Clock, Play, Trash2, ArrowRight, BarChart3, Search, RotateCw, Cloud, CloudOff } from "lucide-react";
 import { getStreak, getSnapshots, deleteSnapshot } from "../utils/storage";
 import { getStats } from "../utils/analytics";
@@ -15,17 +15,31 @@ export default function JournalModal({
   dueReviews = null,       // if provided, use this instead of reading localStorage
   onRefreshQueue = null,
 }) {
-  const [streak] = useState(() => getStreak());
+  const [streak, setStreak] = useState(() => getStreak());
   const [snapshots, setSnapshots] = useState(() => getSnapshots());
 
   // Use prop-provided dueReviews (from useSRS) if available, otherwise fall back to local
   const resolvedDueReviews = dueReviews ?? [];
 
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-  const [stats] = useState(() => getStats());
+  const [stats, setStats] = useState(() => getStats());
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("all");
   const modalRef = useFocusTrap(open);
+
+  // Refresh stats/streak/snapshots each time the journal opens (they change while it is closed)
+  useEffect(() => {
+    if (open) {
+      try {
+        setStreak(getStreak());
+        setStats(getStats());
+        setSnapshots(getSnapshots());
+        onRefreshQueue?.();
+      } catch {}
+    }
+    // onRefreshQueue is stable; refresh intentionally on open only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const query = searchQuery.trim().toLowerCase();
   const filteredSnapshots = snapshots.filter((s) => !query || s.title?.toLowerCase().includes(query));

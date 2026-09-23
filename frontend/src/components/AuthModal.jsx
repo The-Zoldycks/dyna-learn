@@ -122,10 +122,22 @@ export default function AuthModal({
     try {
       if (mode === "login") {
         await onLoginWithPassword(email, password);
+        onClose();
       } else {
-        await onSignUpWithPassword(email, password, name);
+        try {
+          await onSignUpWithPassword(email, password, name);
+          onClose();
+        } catch (err) {
+          // Verification branch: keep the modal open on a notice instead of closing.
+          if (err.needsVerification) {
+            setMode("forgot-sent");
+            setResetEmail(email);
+            setErrorMsg("");
+          } else {
+            throw err;
+          }
+        }
       }
-      onClose();
     } catch (err) {
       const msg = err.message || "";
       if (msg.includes("Invalid login credentials")) {
@@ -243,7 +255,9 @@ export default function AuthModal({
             {mode === "forgot" &&
               "Enter your email and we'll send you a link to create a new password."}
             {mode === "forgot-sent" &&
-              `A reset link has been sent to ${resetEmail}. It may take a minute to arrive.`}
+              (resetEmail
+                ? `A link has been sent to ${resetEmail}. It may take a minute to arrive.`
+                : "Check your inbox for the confirmation link.")}
             {mode === "reset" &&
               "Enter your new password below."}
           </p>
@@ -268,7 +282,7 @@ export default function AuthModal({
                 <SendHorizonal size={26} className="text-emerald-600" />
               </div>
               <p className="text-xs text-slate-500 text-center leading-relaxed max-w-xs">
-                Didn't receive it? Check your spam folder or{" "}
+                {resetEmail ? "Didn't receive it? Check your spam folder or " : "Confirm your email, then come back and "}
                 <button
                   type="button"
                   onClick={() => { setMode("forgot"); setErrorMsg(""); }}

@@ -4,20 +4,22 @@ const SNAPSHOTS_KEY = "dyna-snapshots";
 const SRS_KEY = "dyna-srs";
 const STREAK_KEY = "dyna-streak";
 
-// ── Streak Engine ────────────────────────────────────────────────────────
+// ── Streak Engine (UTC calendar days — immune to midnight/DST/travel) ────
+function utcDay(offset = 0) {
+  const d = new Date(Date.now() + offset * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
 export function updateStreakOnLoad() {
   try {
     const data = JSON.parse(localStorage.getItem(STREAK_KEY) || '{"streak":0,"lastDate":null}');
-    const today = new Date().toDateString();
-    
+    const today = utcDay();
+
     if (data.lastDate === today) return data.streak; // Already logged today
-    
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    const isConsecutive = data.lastDate === yesterday.toDateString();
+
+    const isConsecutive = data.lastDate === utcDay(-1);
     const newStreak = isConsecutive ? data.streak + 1 : 1;
-    
+
     localStorage.setItem(STREAK_KEY, JSON.stringify({ streak: newStreak, lastDate: today }));
     return newStreak;
   } catch {
@@ -49,7 +51,7 @@ export function saveSnapshot(title, nodes, edges, chatHistory) {
   });
 
   const newSnap = {
-    id: "snap_" + Date.now(),
+    id: "snap_" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "_" + Math.floor(Math.random() * 1e9)),
     title,
     date: new Date().toISOString(),
     nodes,

@@ -162,35 +162,44 @@ if (typeof window !== "undefined") {
   if (code) {
     const verifier = getPkceVerifier();
     if (verifier) {
-      (async () => {
-        try {
-          const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: SUPABASE_ANON_KEY,
-            },
-            body: JSON.stringify({ code, code_verifier: verifier }),
-          });
-          if (!res.ok) throw new Error(`PKCE exchange failed: ${res.status}`);
-          const json = await res.json();
-          const session = {
-            access_token: json.access_token,
-            refresh_token: json.refresh_token,
-            expires_at: Math.floor(Date.now() / 1000) + json.expires_in,
-            user: json.user,
-          };
-          setStoredSession(session);
-          scheduleTokenRefresh(session);
-          setPkceVerifier(null);
-          window.history.replaceState(null, "", window.location.pathname);
-          notifyAuthChange("SIGNED_IN", session);
-        } catch (err) {
-          console.error("PKCE code exchange failed:", err);
-          setPkceVerifier(null);
-        }
-      })();
+      exchangePkceCode(code, verifier);
+    } else {
+      // Code without a verifier (recovery link, second tab, cleared storage):
+      // don't leave a dead ?code= in the URL.
+      window.history.replaceState(null, "", window.location.pathname);
+      console.warn("Auth code present without PKCE verifier — restart sign-in.");
     }
+  }
+}
+
+// Exchange an OAuth/recovery code for a session (verifier-less recovery links
+// still fail closed here; the reset modal handles password recovery separately).
+async function exchangePkceCode(code, verifier) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ code, code_verifier: verifier }),
+    });
+    if (!res.ok) throw new Error(`PKCE exchange failed: ${res.status}`);
+    const json = await res.json();
+    const session = {
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
+      expires_at: Math.floor(Date.now() / 1000) + json.expires_in,
+      user: json.user,
+    };
+    setStoredSession(session);
+    scheduleTokenRefresh(session);
+    setPkceVerifier(null);
+    window.history.replaceState(null, "", window.location.pathname);
+    notifyAuthChange("SIGNED_IN", session);
+  } catch (err) {
+    console.error("PKCE code exchange failed:", err);
+    setPkceVerifier(null);
   }
 }
 
@@ -205,6 +214,12 @@ if (typeof window !== "undefined") {
           notifyAuthChange("SIGNED_IN", session);
         } else {
           if (refreshTimer) clearTimeout(refreshTimer);
+          // Drop cloud-session pointers so this tab can't re-save to the old account
+          try {
+            localStorage.removeItem("dyna_active_session_id");
+            localStorage.removeItem("dyna-nodes");
+            localStorage.removeItem("dyna-edges");
+          } catch {}
           notifyAuthChange("SIGNED_OUT", null);
         }
       } catch {}
@@ -377,7 +392,7 @@ export const auth = {
       const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-        body: JSON.stringify({ email, gotrue_meta_security: {}, redirectTo }),
+        body: JSON.stringify({ email, gotrue_meta_security: {}, redirect_to: redirectTo }),
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));

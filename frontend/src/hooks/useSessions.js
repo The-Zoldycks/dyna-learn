@@ -88,11 +88,21 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
     const localSnaps = getSnapshots();
     if (!localSnaps.length) return;
 
-    // Migrate in background without blocking UI
+    // Migrate in background without blocking UI (idempotent — skips already-migrated titles)
+    const fingerprint = (s) => `${s.title || "Migrated Lesson"}::${(s.nodes || []).length}::${(s.edges || []).length}`;
     (async () => {
+      let existingTitles = new Set();
+      try {
+        const { data } = await supabase.from("study_sessions").select("title, nodes, edges").eq("user_id", user.id);
+        existingTitles = new Set((data || []).map((r) => `${r.title}::${(r.nodes || []).length}::${(r.edges || []).length}`));
+      } catch {}
       let migratedCount = 0;
       for (const snap of localSnaps) {
         try {
+          if (existingTitles.has(fingerprint(snap))) {
+            deleteLocalSnapshot(snap.id);
+            continue;
+          }
           const { error } = await supabase.from("study_sessions").insert({
             user_id: user.id,
             title: snap.title || "Migrated Lesson",
@@ -317,13 +327,20 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
       if (!isConfigured) {
         deleteLocalSnapshot(sessionId);
         setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-        if (activeSessionId === sessionId) setActiveSessionId(null);
+        if (activeSessionId === sessionId) {
+          setActiveSessionId(null);
+          localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+        }
         toast.success("Lesson deleted");
         return;
       }
 
       try {
-        const { error } = await supabase.from("study_sessions").delete().eq("id", sessionId);
+        const { error } = await supabase
+          .from("study_sessions")
+          .delete()
+          .eq("id", sessionId)
+          .eq("user_id", user.id);
         if (error) throw error;
         setSessions((prev) => prev.filter((s) => s.id !== sessionId));
         if (activeSessionId === sessionId) {
@@ -335,7 +352,7 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
         toast.error("Failed to delete session");
       }
     },
-    [isConfigured, activeSessionId]
+    [isConfigured, activeSessionId, user]
   );
 
   // ── Rename Session ────────────────────────────────────────────────────────
@@ -355,18 +372,28 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
       }
 
       try {
-        const { error } = await supabase
+        const current = sessions.find((s) => s.id === sessionId);
+        const version = current?.version ?? activeSessionVersion;
+        const { data, error } = await supabase
           .from("study_sessions")
-          .update({ title: newTitle.trim() })
-          .eq("id", sessionId);
+          .update({ title: newTitle.trim(), version: version + 1, updated_at: new Date().toISOString() })
+          .eq("id", sessionId)
+          .eq("version", version)
+          .select("id, version");
         if (error) throw error;
-        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle.trim() } : s)));
+        if (!data || data.length === 0) {
+          toast.error("Rename conflicted with a newer cloud version — reloading list.");
+          fetchSessions();
+          return;
+        }
+        if (sessionId === activeSessionId) setActiveSessionVersion(version + 1);
+        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle.trim(), version: version + 1 } : s)));
         toast.success("Renamed session");
       } catch {
         toast.error("Failed to rename session");
       }
     },
-    [isConfigured]
+    [isConfigured, sessions, activeSessionId, activeSessionVersion, fetchSessions]
   );
 
   // ── 25-Second Idle Auto-Save ──────────────────────────────────────────────
@@ -379,7 +406,17 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
     }, 25000); // 25s debounce
   }, [isConfigured, activeSessionId, saveSession]);
 
-  // Flush on beforeunload — queue synchronously (async save never completes on unload)
+  // Auto-save on canvas/chat edits (not only after tutor calls)
+  useEffect(() => {
+    if (!isConfigured || !activeSessionId) return;
+    triggerIdleAutoSave();
+    return () => {
+      if (idleSaveTimerRef.current) clearTimeout(idleSaveTimerRef.current);
+    };
+  }, [isConfigured, activeSessionId, nodes, edges, chatHistory, triggerIdleAutoSave]);
+
+  // Flush on beforeunload — queue synchronously (async save never completes on unload).
+  // Coalesces: replaces any pending entry for the same session instead of pushing.
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (!isConfigured || !activeSessionId) return;
@@ -387,7 +424,10 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
         const { nodes: n, edges: e, chatHistory: c } = latestStateRef.current;
         if (!n?.length) return;
         const queue = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
-        queue.push({ id: activeSessionId, title: null, nodes: n, edges: e, chat_history: sanitizeChat(c || []), version: activeSessionVersion, userId: user.id, timestamp: Date.now() });
+        const entry = { id: activeSessionId, title: null, nodes: n, edges: e, chat_history: sanitizeChat(c || []), version: activeSessionVersion, userId: user.id, timestamp: Date.now() };
+        const idx = queue.findIndex((q) => q.id === activeSessionId && (!q.userId || q.userId === user.id));
+        if (idx >= 0) queue[idx] = entry;
+        else queue.push(entry);
         localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
       } catch {}
     };
@@ -395,10 +435,13 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isConfigured, activeSessionId, activeSessionVersion, user, sanitizeChat]);
 
-  // Flush offline queue when returning online (handles creates + updates with OCC)
+  // Flush offline queue: on reconnect AND on mount/login while already online.
+  // Removes only per-item successes and rebases updates to the latest version.
   useEffect(() => {
-    const handleOnline = async () => {
-      if (!isConfigured) return;
+    if (!isConfigured) return;
+    let cancelled = false;
+    const flushQueue = async () => {
+      if (cancelled) return;
       try {
         const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
         if (!raw) return;
@@ -407,18 +450,28 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
         const myQueue = queue.filter((item) => !item.userId || item.userId === user.id);
         const otherQueue = queue.filter((item) => item.userId && item.userId !== user.id);
         if (myQueue.length === 0) return;
-        toast.info("Reconnected. Syncing offline changes to cloud...");
+        toast.info("Syncing offline changes to cloud...");
+        const remaining = [...otherQueue];
         for (const item of myQueue) {
+          let ok = false;
           if (item.id) {
-            const { error } = await supabase.from("study_sessions").update({
+            // Rebase to the latest server version so sequential queued edits don't OCC-fail
+            const { data: latest } = await supabase
+              .from("study_sessions")
+              .select("id, version")
+              .eq("id", item.id)
+              .single();
+            const baseVersion = latest?.version ?? (item.version || 1);
+            const { data, error } = await supabase.from("study_sessions").update({
               title: item.title || undefined,
               nodes: item.nodes,
               edges: item.edges,
               chat_history: item.chat_history,
-              version: (item.version || 1) + 1,
+              version: baseVersion + 1,
               updated_at: new Date().toISOString(),
-            }).eq("id", item.id).eq("version", item.version || 1).select("id");
-            if (error) console.warn("Offline update failed:", error.message);
+            }).eq("id", item.id).eq("version", baseVersion).select("id");
+            ok = !error && data && data.length > 0;
+            if (!ok) console.warn("Offline update failed:", error?.message || "version conflict");
           } else {
             const { error } = await supabase.from("study_sessions").insert({
               user_id: user.id,
@@ -428,21 +481,27 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
               chat_history: item.chat_history || [],
               version: 1,
             });
-            if (error) console.warn("Offline create failed:", error.message);
+            ok = !error;
+            if (!ok) console.warn("Offline create failed:", error?.message);
           }
+          if (!ok) remaining.push(item);
         }
-        // Keep other-user queue entries, discard mine
-        if (otherQueue.length) localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(otherQueue));
+        if (remaining.length) localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
         else localStorage.removeItem(OFFLINE_QUEUE_KEY);
-        toast.success("Cloud sync complete ✓");
+        if (remaining.length === otherQueue.length) toast.success("Cloud sync complete ✓");
+        else toast.warning("Some offline changes need review — check the Sessions list.");
         fetchSessions();
       } catch (err) {
         console.warn("Failed to flush offline queue:", err);
       }
     };
 
-    window.addEventListener("online", handleOnline);
-    return () => window.removeEventListener("online", handleOnline);
+    flushQueue(); // mount/login while already online
+    window.addEventListener("online", flushQueue);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", flushQueue);
+    };
   }, [isConfigured, user, fetchSessions]);
 
   // Conflict resolvers
@@ -495,8 +554,9 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
       try {
         const { data, error } = await supabase
           .from("study_sessions")
-          .select("id, title, nodes, edges, chat_history")
+          .select("id, title, nodes, edges, chat_history, is_public")
           .eq("id", sessionId)
+          .eq("is_public", true)
           .single();
         if (error || !data) return null;
         return data;

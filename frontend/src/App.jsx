@@ -250,14 +250,21 @@ export default function App() {
     const shareId = params.get("share");
 
     if (shareId) {
-      // Cloud share link: ?share=<uuid>
+      // Cloud share link: ?share=<uuid> — always strip the query so failures can't loop on reload
+      const stripShare = () => {
+        const clean = new URLSearchParams(window.location.search);
+        clean.delete("share");
+        const qs = clean.toString();
+        window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+      };
       (async () => {
         try {
           const session = await loadSharedSession(shareId);
+          stripShare();
           if (session) {
             if (session.nodes?.length) setNodes(session.nodes);
             if (session.edges) setEdges(session.edges);
-            window.history.replaceState(null, "", window.location.pathname);
+            if (session.chat_history?.length) setChatHistory(session.chat_history);
             toast.success(`Loaded shared lesson: "${session.title}"`, {
               duration: 4000,
               description: "Sign in to save your own copy.",
@@ -269,6 +276,7 @@ export default function App() {
           }
         } catch (err) {
           console.error("Failed to load shared session:", err);
+          stripShare();
           toast.error("Failed to load shared lesson.");
         }
       })();
@@ -978,6 +986,12 @@ export default function App() {
     }
   }, [nodes, edges, downloadBlob]);
 
+  // Abort any live recognizer on unmount so it can't fire on a dead component
+  useEffect(() => () => {
+    try { recognitionRef.current?.abort(); } catch {}
+    recognitionRef.current = null;
+  }, []);
+
   // ---- Voice Input (tap-to-toggle with auto-append) ---------------------
   const toggleVoice = useCallback((e) => {
     e.preventDefault();
@@ -995,7 +1009,7 @@ export default function App() {
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
-    
+
     recognition.onstart = () => setIsListening(true);
     recognition.onresult = (event) => {
       const transcript = event.results?.[0]?.[0]?.transcript || "";
@@ -1006,13 +1020,21 @@ export default function App() {
     recognition.onerror = (event) => {
       console.error("Speech recognition error", event.error);
       setIsListening(false);
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        toast.error("Microphone blocked", { description: "Allow microphone access in your browser settings." });
+      } else if (event.error === "network") {
+        toast.error("Voice input unavailable", { description: "Speech recognition needs an internet connection." });
+      }
     };
     recognition.onend = () => setIsListening(false);
     
     recognitionRef.current = recognition;
     try {
       recognition.start();
-    } catch {
+    } catch (err) {
+      console.error("Speech recognition start failed:", err);
+      toast.error("Voice input failed to start", { description: "Try again, or type your question." });
+      recognitionRef.current = null;
       setIsListening(false);
     }
   }, [loading, isListening]);

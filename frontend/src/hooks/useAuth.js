@@ -107,9 +107,11 @@ export function useAuth() {
         description: "Check your email for the confirmation link, or disable 'Confirm email' in your Supabase dashboard.",
         duration: 8000,
       });
-    } else {
-      toast.success("Account created successfully!");
+      const needsVerification = new Error("Email verification required — check your inbox.");
+      needsVerification.needsVerification = true;
+      throw needsVerification;
     }
+    toast.success("Account created successfully!");
     return data;
   }, [isConfigured]);
 
@@ -123,7 +125,8 @@ export function useAuth() {
       localStorage.removeItem("dyna_active_session_id");
       localStorage.removeItem("dyna-nodes");
       localStorage.removeItem("dyna-edges");
-      // Keep chat for guest continuity, remove offline queue for this user
+      localStorage.removeItem("dyna-chat");
+      // Remove offline queue for this user
       const raw = localStorage.getItem("dyna_offline_sessions_queue");
       if (raw) {
         const queue = JSON.parse(raw);

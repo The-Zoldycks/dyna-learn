@@ -27,8 +27,9 @@ export function useSRS({ user }) {
     label: row.label,
     interval: row.interval_days ?? 0,
     ease: row.ease_factor ?? 2.5,
-    nextReview: new Date(row.next_review_at).getTime(),
-    addedAt: new Date(row.created_at).getTime(),
+    repetitions: row.repetitions ?? 0,
+    nextReview: row.next_review_at ? new Date(row.next_review_at).getTime() : Date.now(),
+    addedAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
   });
 
   // ── Load queue ──────────────────────────────────────────────────────────
@@ -53,6 +54,7 @@ export function useSRS({ user }) {
   }, [isConfigured, user]);
 
   // Initial load
+  // Intentional sync of external store (Supabase/localStorage) into state
   // eslint-disable-next-line react/set-state-in-effect
   useEffect(() => {
     fetchQueue();
@@ -67,10 +69,10 @@ export function useSRS({ user }) {
     if (!localCards.length) return;
 
     (async () => {
-      let migrated = 0;
+      const migratedIds = new Set();
       for (const card of localCards) {
         try {
-          await supabase.from("srs_cards").insert({
+          const { error } = await supabase.from("srs_cards").insert({
             user_id: user.id,
             node_id: card.nodeId,
             label: card.label,
@@ -79,16 +81,21 @@ export function useSRS({ user }) {
             repetitions: 0,
             next_review_at: new Date(card.nextReview).toISOString(),
           });
-          migrated++;
+          if (error) throw error;
+          migratedIds.add(card.id);
         } catch {
-          // If a duplicate label exists (unique constraint), just skip
+          // Duplicate or failed — keep the card locally, don't wipe it below
         }
       }
-      if (migrated > 0) {
-        // Clear local after successful migration
-        try { localStorage.removeItem("dyna-srs"); } catch {}
+      if (migratedIds.size > 0) {
+        // Remove only successfully migrated cards; keep failures locally
+        try {
+          const remaining = getSRSQueue().filter((c) => !migratedIds.has(c.id));
+          if (remaining.length) localStorage.setItem("dyna-srs", JSON.stringify(remaining));
+          else localStorage.removeItem("dyna-srs");
+        } catch {}
         toast.success(
-          `Synced ${migrated} flashcard${migrated === 1 ? "" : "s"} to your account!`,
+          `Synced ${migratedIds.size} flashcard${migratedIds.size === 1 ? "" : "s"} to your account!`,
           { duration: 4000 }
         );
         fetchQueue();
@@ -107,27 +114,31 @@ export function useSRS({ user }) {
         return;
       }
 
+      // Normalize to match local dedup (case-insensitive) and avoid cloud duplicates
+      const normLabel = String(label).trim();
+      const matchLabel = normLabel.toLowerCase();
+      const resetToDue = (id) => supabase
+        .from("srs_cards")
+        .update({ interval_days: 0, next_review_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("user_id", user.id);
       try {
-        // Check if already tracked for this user
-        const { data: existing } = await supabase
+        // Check if already tracked for this user (compare case-insensitively)
+        const { data: candidates } = await supabase
           .from("srs_cards")
-          .select("id, interval_days")
-          .eq("user_id", user.id)
-          .eq("label", label)
-          .single();
+          .select("id, label")
+          .eq("user_id", user.id);
+        const existing = (candidates || []).find((c) => String(c.label || "").toLowerCase() === matchLabel);
 
         if (existing) {
           // Confused again → reset interval to 0, due immediately
-          await supabase
-            .from("srs_cards")
-            .update({ interval_days: 0, next_review_at: new Date().toISOString() })
-            .eq("id", existing.id);
+          await resetToDue(existing.id);
         } else {
           const reviewIn12h = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
           const { error: insertError } = await supabase.from("srs_cards").insert({
             user_id: user.id,
             node_id: nodeId,
-            label,
+            label: normLabel,
             interval_days: 0,
             ease_factor: 2.5,
             repetitions: 0,
@@ -139,16 +150,10 @@ export function useSRS({ user }) {
               // Lost the select→insert race — re-fetch and reset the winner
               const { data: winner } = await supabase
                 .from("srs_cards")
-                .select("id")
-                .eq("user_id", user.id)
-                .eq("label", label)
-                .single();
-              if (winner?.id) {
-                await supabase
-                  .from("srs_cards")
-                  .update({ interval_days: 0, next_review_at: new Date().toISOString() })
-                  .eq("id", winner.id);
-              }
+                .select("id, label")
+                .eq("user_id", user.id);
+              const match = (winner || []).find((c) => String(c.label || "").toLowerCase() === matchLabel);
+              if (match?.id) await resetToDue(match.id);
             } else {
               throw insertError;
             }
@@ -157,33 +162,52 @@ export function useSRS({ user }) {
         fetchQueue();
       } catch (err) {
         console.warn("useSRS: logCard failed, falling back to local", err);
-        logLocal(nodeId, label);
+        logLocal(nodeId, normLabel);
+        setQueue(getSRSQueue());
       }
     },
     [isConfigured, user, fetchQueue]
   );
 
   // ── Update after quiz (SM-2) ────────────────────────────────────────────
+  // Accepts boolean passed or "again"/"good"/"easy" rating (easy earns bonus ease).
   const reviewCard = useCallback(
     async (id, passed) => {
+      const rating = typeof passed === "string" ? passed : (passed ? "good" : "again");
+      const isPass = rating !== "again";
       if (!isConfigured) {
-        updateLocal(id, passed);
+        updateLocal(id, isPass);
         setQueue(getSRSQueue());
         return;
       }
 
-      // Find card in current queue
-      const card = queue.find((c) => c.id === id);
-      if (!card) return;
+      // Find card in current queue — refetch on miss (stale practiceItems)
+      let card = queue.find((c) => c.id === id);
+      if (!card) {
+        try {
+          const { data } = await supabase
+            .from("srs_cards")
+            .select("*")
+            .eq("id", id)
+            .eq("user_id", user.id)
+            .single();
+          if (data) card = fromRow(data);
+        } catch {}
+        if (!card) {
+          toast.error("Couldn't find that flashcard — reopen the Journal and try again.");
+          return;
+        }
+      }
 
       let newInterval = card.interval;
       let newEase = card.ease;
       let reps = (card.repetitions ?? 0) + 1;
 
-      if (passed) {
+      if (isPass) {
         if (newInterval === 0) newInterval = 1;
         else if (newInterval === 1) newInterval = 3;
         else newInterval = Math.round(newInterval * newEase);
+        if (rating === "easy") newEase = Math.min(3.0, newEase + 0.15);
       } else {
         newInterval = 0;
         newEase = Math.max(1.3, newEase - 0.2);
@@ -195,7 +219,7 @@ export function useSRS({ user }) {
       ).toISOString();
 
       try {
-        await supabase
+        const { error } = await supabase
           .from("srs_cards")
           .update({
             interval_days: newInterval,
@@ -204,14 +228,17 @@ export function useSRS({ user }) {
             next_review_at: nextReviewAt,
             updated_at: new Date().toISOString(),
           })
-          .eq("id", id);
+          .eq("id", id)
+          .eq("user_id", user.id);
+        if (error) throw error;
         fetchQueue();
       } catch (err) {
         console.warn("useSRS: reviewCard failed, falling back to local", err);
-        updateLocal(id, passed);
+        updateLocal(id, isPass);
+        setQueue(getSRSQueue());
       }
     },
-    [isConfigured, queue, fetchQueue]
+    [isConfigured, queue, user, fetchQueue]
   );
 
   // eslint-disable-next-line react/purity

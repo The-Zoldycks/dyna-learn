@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { LogIn, LogOut, Flame, FolderKanban, ChevronDown } from "lucide-react";
+import { getStreak } from "../utils/storage.js";
 
 export default function UserMenu({ user, profile, initials, onOpenAuth, onOpenSessions, onLogout }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -22,6 +23,16 @@ export default function UserMenu({ user, profile, initials, onOpenAuth, onOpenSe
     };
   }, []);
 
+  // Single source of truth: local streak engine (same as Journal). Re-read on open.
+  // Hooks must run unconditionally — before the guest early-return below.
+  const [streakCount, setStreakCount] = useState(() => getStreak());
+  // eslint-disable-next-line react/set-state-in-effect
+  useEffect(() => {
+    if (dropdownOpen) {
+      try { setStreakCount(getStreak()); } catch {}
+    }
+  }, [dropdownOpen]);
+
   if (!user) {
     return (
       <button
@@ -37,7 +48,6 @@ export default function UserMenu({ user, profile, initials, onOpenAuth, onOpenSe
 
   const avatarUrl = profile?.avatar_url || user?.user_metadata?.avatar_url;
   const displayName = profile?.display_name || user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Learner";
-  const streakCount = profile?.streak || 1;
 
   return (
     <div className="relative" ref={menuRef}>

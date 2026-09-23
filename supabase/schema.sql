@@ -125,6 +125,20 @@ end $$;
 -- Speed up SRS lookups by session
 create index if not exists idx_srs_session on public.srs_cards(session_id);
 
+-- Prevent duplicate cards per user+label (logCard assumes this; without it
+-- the select→insert race creates duplicates). Cleans existing dupes first.
+do $$ begin
+  delete from public.srs_cards a using public.srs_cards b
+    where a.user_id = b.user_id
+      and lower(a.label) = lower(b.label)
+      and a.created_at > b.created_at;
+  if not exists (select 1 from pg_constraint where conname = 'srs_cards_user_label_unique') then
+    alter table public.srs_cards
+      add constraint srs_cards_user_label_unique unique (user_id, label);
+  end if;
+exception when undefined_table then null;
+end $$;
+
 -- Auto-touch updated_at on writes (backend also sets it explicitly; trigger is the backstop)
 create or replace function public.touch_updated_at()
 returns trigger
