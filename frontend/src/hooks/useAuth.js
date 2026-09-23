@@ -64,7 +64,7 @@ export function useAuth() {
       toast.info("Supabase is not configured yet. Operating in Guest Mode.");
       return;
     }
-    const { error } = supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       redirectTo: window.location.origin,
     });
@@ -115,11 +115,25 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     if (!isConfigured) return;
+    const prevUserId = user?.id;
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    try {
+      localStorage.removeItem("dyna_active_session_id");
+      localStorage.removeItem("dyna-nodes");
+      localStorage.removeItem("dyna-edges");
+      // Keep chat for guest continuity, remove offline queue for this user
+      const raw = localStorage.getItem("dyna_offline_sessions_queue");
+      if (raw) {
+        const queue = JSON.parse(raw);
+        const filtered = prevUserId ? queue.filter((item) => item.userId !== prevUserId) : [];
+        if (filtered.length) localStorage.setItem("dyna_offline_sessions_queue", JSON.stringify(filtered));
+        else localStorage.removeItem("dyna_offline_sessions_queue");
+      }
+    } catch {}
     toast.info("Signed out", { description: "Switched to local Guest Mode." });
-  }, [isConfigured]);
+  }, [isConfigured, user]);
 
   const requestPasswordReset = useCallback(async (email) => {
     if (!isConfigured) {
@@ -137,6 +151,19 @@ export function useAuth() {
     });
   }, [isConfigured]);
 
+  const updatePassword = useCallback(async (newPassword) => {
+    if (!isConfigured) {
+      toast.info("Supabase is not configured yet.");
+      return;
+    }
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      toast.error("Password update failed", { description: error.message });
+      throw error;
+    }
+    toast.success("Password updated!", { description: "You can now sign in with your new password." });
+  }, [isConfigured]);
+
   // Initials generator for fallback avatar
   const initials = getInitials(profile?.display_name || user?.user_metadata?.full_name || user?.email || "Guest");
 
@@ -151,6 +178,7 @@ export function useAuth() {
     signUpWithPassword,
     logout,
     requestPasswordReset,
+    updatePassword,
     refreshProfile: () => (user ? loadProfile(user.id) : null),
   };
 }

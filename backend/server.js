@@ -37,6 +37,61 @@ const FALLBACK_MODELS = [
 // Last known-good model — tried first to skip the fallback chain on warm paths
 let workingModel = null;
 let workingModelExpiresAt = 0;
+const WORKING_MODEL_TTL_MS = 10 * 60 * 1000;
+
+// Monthly budget guard — estimated spend, resets monthly
+let monthlySpendUSD = 0;
+let monthlySpendResetAt = Date.now();
+function estimateTutorCostUSD(inputChars, outputChars) {
+  const inputTokens = Math.ceil(inputChars / 4);
+  const outputTokens = Math.ceil(outputChars / 4);
+  return (inputTokens / 1e6) * 0.25 + (outputTokens / 1e6) * 1.5;
+}
+function checkBudgetOrThrow() {
+  const cap = parseFloat(process.env.GEMINI_MONTHLY_CAP_USD || "");
+  if (!cap || Number.isNaN(cap)) return;
+  // Reset monthly
+  if (Date.now() - monthlySpendResetAt > 30 * 24 * 60 * 60 * 1000) {
+    monthlySpendUSD = 0;
+    monthlySpendResetAt = Date.now();
+  }
+  if (monthlySpendUSD >= cap) {
+    const err = new Error("Monthly budget exhausted");
+    err.code = "BUDGET_EXHAUSTED";
+    throw err;
+  }
+}
+
+// Guest daily cap (in-memory, per-IP)
+const guestDailyCounts = new Map(); // ip -> { count, day }
+function checkGuestDailyCap(req) {
+  const auth = req.headers.authorization || "";
+  const isGuest = !auth.startsWith("Bearer ") || auth.length < 20;
+  if (!isGuest) return;
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const day = new Date().toISOString().slice(0, 10);
+  const entry = guestDailyCounts.get(ip);
+  if (!entry || entry.day !== day) {
+    guestDailyCounts.set(ip, { count: 1, day });
+    return;
+  }
+  entry.count += 1;
+  const GUEST_DAILY_LIMIT = 40;
+  if (entry.count > GUEST_DAILY_LIMIT) {
+    const err = new Error("Guest daily limit exceeded — sign in for higher limits");
+    err.code = "GUEST_DAILY_LIMIT";
+    err.status = 429;
+    throw err;
+  }
+}
+
+// TTS concurrency guard
+let ttsActive = 0;
+const TTS_MAX_CONCURRENT = 3;
+
+function truncateLabel(s, n = 200) {
+  return typeof s === "string" && s.length > n ? s.slice(0, n) : s;
+}
 
 // Security middleware
 app.use(helmet({
@@ -84,7 +139,7 @@ app.use(cors({
   maxAge: 86400,
 }));
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '8mb' }));
 
 // Behind Render's proxy — without this, express-rate-limit counts the proxy IP as one user
 app.set('trust proxy', 1);
@@ -95,6 +150,7 @@ const tutorLimiter = rateLimit({
   limit: 20,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
   message: { error: "Too many tutor requests — wait a minute and retry.", code: "TUTOR_RATE_LIMIT" },
 });
 const ttsLimiter = rateLimit({
@@ -102,6 +158,7 @@ const ttsLimiter = rateLimit({
   limit: 30,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
   message: { error: "Too many TTS requests — wait a minute and retry.", code: "TTS_RATE_LIMIT" },
 });
 app.use("/api/tutor", tutorLimiter);
@@ -153,11 +210,32 @@ app.post("/api/tutor", async (req, res) => {
     const CANVAS_NODE_LIMIT = 30;
     const CANVAS_EDGE_LIMIT = 100;
     const canvasForPrompt = {
-      nodes: (effectiveCanvas.nodes || []).slice(-CANVAS_NODE_LIMIT),
-      edges: (effectiveCanvas.edges || []).slice(-CANVAS_EDGE_LIMIT),
+      nodes: (effectiveCanvas.nodes || []).slice(-CANVAS_NODE_LIMIT).map((n) => ({
+        ...n,
+        id: truncateLabel(n.id, 100),
+        label: truncateLabel(n.label || n.data?.label, 200),
+        data: n.data ? { ...n.data, label: truncateLabel(n.data.label, 200) } : n.data,
+      })),
+      edges: (effectiveCanvas.edges || []).slice(-CANVAS_EDGE_LIMIT).map((e) => ({
+        ...e,
+        id: truncateLabel(e.id, 100),
+        source: truncateLabel(e.source, 100),
+        target: truncateLabel(e.target, 100),
+        label: truncateLabel(e.label, 200),
+      })),
     };
     if ((effectiveCanvas.nodes || []).length > CANVAS_NODE_LIMIT) {
       console.warn(`[tutor] canvas truncated ${effectiveCanvas.nodes.length} → ${CANVAS_NODE_LIMIT} nodes for prompt`);
+    }
+
+    // Budget and guest guards
+    try {
+      checkBudgetOrThrow();
+      checkGuestDailyCap(req);
+    } catch (guardErr) {
+      const code = guardErr.code || "TUTOR_ERROR";
+      const status = guardErr.status || (code === "BUDGET_EXHAUSTED" ? 503 : 429);
+      return res.status(status).json({ error: guardErr.message, code });
     }
 
     // Sliding window: retain last 6 conversation turns (3 user prompts + 3 AI responses)
@@ -367,41 +445,66 @@ Rules:
       parts: currentParts,
     });
 
-    // Try cached working model first, then primary + fallbacks on 404 (new-user restriction on 2.5)
-    // 30s abort per attempt so a hung model never blocks the event loop indefinitely
+    // Expire stale pinned model
+    if (workingModel && Date.now() > workingModelExpiresAt) {
+      console.log(`[tutor] workingModel ${workingModel} expired, clearing pin`);
+      workingModel = null;
+      workingModelExpiresAt = 0;
+    }
     let response;
     let lastError;
     const ordered = workingModel && workingModel !== GEMINI_MODEL
       ? [workingModel, GEMINI_MODEL, ...FALLBACK_MODELS.filter((m) => m !== GEMINI_MODEL && m !== workingModel)]
       : [GEMINI_MODEL, ...FALLBACK_MODELS.filter((m) => m !== GEMINI_MODEL)];
     const candidates = [...new Set(ordered)];
-    for (const model of candidates) {
-      try {
-        console.log(`[tutor] attempting model: ${model} | selectedNode: ${selectedNodeId || "none"} | history: ${windowedHistory.length}`);
-        response = await ai.models.generateContent({
-          model,
-          contents,
-          config: {
-            systemInstruction,
-            responseMimeType: "application/json",
-            responseSchema,
-            httpOptions: { timeout: 30000 },
-          },
-        });
-        console.log(`[tutor] success with model: ${model}`);
-        workingModel = model;
-        break;
-      } catch (err) {
-        lastError = err;
-        const msg = err?.message || "";
-        const status = err?.status ?? err?.code ?? err?.response?.status;
-        const is404 = status === 404 || msg.includes("404") || msg.includes("NOT_FOUND") || msg.includes("no longer available") || msg.includes("MODEL_NOT_FOUND");
-        console.warn(`[tutor] model ${model} failed: ${msg.slice(0, 200)}`);
-        if (!is404) throw err;
-        // otherwise continue to next fallback
+
+    const overallTimeout = new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Tutor request timed out after 25s"), { code: "TUTOR_TIMEOUT" })), 25000));
+    const runFallback = async () => {
+      for (let i = 0; i < candidates.length; i++) {
+        const model = candidates[i];
+        try {
+          console.log(`[tutor] attempting model: ${model} | selectedNode: ${selectedNodeId || "none"} | history: ${windowedHistory.length}`);
+          response = await ai.models.generateContent({
+            model,
+            contents,
+            config: {
+              systemInstruction,
+              responseMimeType: "application/json",
+              responseSchema,
+              httpOptions: { timeout: 30000 },
+            },
+          });
+          console.log(`[tutor] success with model: ${model}`);
+          workingModel = model;
+          workingModelExpiresAt = Date.now() + WORKING_MODEL_TTL_MS;
+          return;
+        } catch (err) {
+          lastError = err;
+          const msg = err?.message || "";
+          const status = err?.status ?? err?.code ?? err?.response?.status;
+          const is404 = status === 404 || msg.includes("404") || msg.includes("NOT_FOUND") || msg.includes("no longer available") || msg.includes("MODEL_NOT_FOUND");
+          const isRateLimit = status === 429 || msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("resource_exhausted");
+          const isUnavailable = status === 503 || msg.includes("503") || msg.includes("UNAVAILABLE") || msg.toLowerCase().includes("high demand");
+          console.warn(`[tutor] model ${model} failed: ${msg.slice(0, 200)}`);
+          if (is404 || isRateLimit || isUnavailable) {
+            if (isRateLimit || isUnavailable) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+            continue;
+          }
+          throw err;
+        }
       }
+    };
+    try {
+      await Promise.race([runFallback(), overallTimeout]);
+    } catch (e) {
+      if (!response) throw e;
     }
     if (!response) throw lastError || new Error("All Gemini models failed");
+    try {
+      const outChars = (response.text || "").length;
+      const inChars = JSON.stringify(contents).length + systemInstruction.length;
+      monthlySpendUSD += estimateTutorCostUSD(inChars, outChars);
+    } catch {}
 
     // Extract text - SDK returns response.text
     let resultText = response.text;
@@ -421,14 +524,20 @@ Rules:
   } catch (error) {
     console.error("Error in /api/tutor:", error);
     const msg = error.message || "";
-    let code = "TUTOR_ERROR";
-    if (msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.includes("quota")) code = "GEMINI_RATE_LIMIT";
-    else if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.toLowerCase().includes("high demand")) code = "GEMINI_UNAVAILABLE";
-    else if (msg.includes("404") || msg.includes("NOT_FOUND")) code = "GEMINI_MODEL_NOT_FOUND";
-    else if (msg.includes("401") || msg.includes("API key")) code = "GEMINI_AUTH_ERROR";
+    let code = error.code || "TUTOR_ERROR";
+    if (code === "TUTOR_ERROR") {
+      if (msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.includes("quota")) code = "GEMINI_RATE_LIMIT";
+      else if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.toLowerCase().includes("high demand")) code = "GEMINI_UNAVAILABLE";
+      else if (msg.includes("404") || msg.includes("NOT_FOUND")) code = "GEMINI_MODEL_NOT_FOUND";
+      else if (msg.includes("401") || msg.includes("API key")) code = "GEMINI_AUTH_ERROR";
+    }
     const isProd = process.env.NODE_ENV === "production";
-    res.status(code === "GEMINI_RATE_LIMIT" ? 429 : 500).json({
-      error: "Failed to generate tutor response",
+    let status = 500;
+    if (code === "GEMINI_RATE_LIMIT" || code === "GUEST_DAILY_LIMIT") status = 429;
+    else if (code === "BUDGET_EXHAUSTED" || code === "TUTOR_TIMEOUT" || code === "GEMINI_UNAVAILABLE") status = 503;
+    else if (code === "GEMINI_MODEL_NOT_FOUND") status = 404;
+    res.status(status).json({
+      error: code === "BUDGET_EXHAUSTED" ? "Monthly budget exhausted — try again next month" : code === "GUEST_DAILY_LIMIT" ? error.message : "Failed to generate tutor response",
       ...(isProd ? {} : { details: msg.slice(0, 500) }),
       code,
     });
@@ -438,6 +547,15 @@ Rules:
 // --- Edge TTS self-hosted (in-process, no fetch, same as Toolbox-backend) ---
 const EDGE_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const EDGE_VOICE_LIST_URL = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=${EDGE_TOKEN}`;
+
+// Fallback voices when Bing is unreachable — prevents ReferenceError on voices endpoint
+const EDGE_VOICE_FALLBACK = [
+  { id: "en-US-AriaNeural", label: "Aria — Female (en-US)", lang: "en-US", gender: "Female", locale: "en-US" },
+  { id: "en-US-GuyNeural", label: "Guy — Male (en-US)", lang: "en-US", gender: "Male", locale: "en-US" },
+  { id: "en-GB-SoniaNeural", label: "Sonia — Female (en-GB)", lang: "en-GB", gender: "Female", locale: "en-GB" },
+  { id: "en-GB-RyanNeural", label: "Ryan — Male (en-GB)", lang: "en-GB", gender: "Male", locale: "en-GB" },
+  { id: "en-US-JennyNeural", label: "Jenny — Female (en-US)", lang: "en-US", gender: "Female", locale: "en-US" },
+];
 
 // In-memory voices cache (1h TTL) — avoids hitting Bing on every page load
 let voicesCache = { at: 0, voices: null };
@@ -468,7 +586,12 @@ app.get("/api/tts/voices", async (req, res) => {
 
 app.post("/api/tts", async (req, res) => {
   let tmpPath = null;
+  let incremented = false;
   try {
+    if (ttsActive >= TTS_MAX_CONCURRENT) {
+      return res.status(429).json({ error: "Too many concurrent TTS requests — try again shortly", code: "TTS_CONCURRENCY_LIMIT" });
+    }
+    ttsActive++; incremented = true;
     const { text, voice = "en-US-AriaNeural", rate = "+0%", volume = "+0%", pitch = "+0Hz" } = req.body || {};
     if (!text || !text.trim()) return res.status(400).json({ error: "text required", code: "TTS_TEXT_REQUIRED" });
     
@@ -512,13 +635,38 @@ app.post("/api/tts", async (req, res) => {
     const msg = err.message || String(err);
     let code = "TTS_ERROR";
     if (msg.includes("429") || msg.toLowerCase().includes("throttl")) code = "TTS_RATE_LIMIT";
+    else if (msg.toLowerCase().includes("concurrency")) code = "TTS_CONCURRENCY_LIMIT";
     const isProd = process.env.NODE_ENV === "production";
-    res.status(500).json({ error: "Edge TTS failed", ...(isProd ? {} : { details: msg.slice(0, 1000) }), code });
+    const status = code === "TTS_RATE_LIMIT" || code === "TTS_CONCURRENCY_LIMIT" ? 429 : 500;
+    if (!res.headersSent) res.status(status).json({ error: "Edge TTS failed", ...(isProd ? {} : { details: msg.slice(0, 1000) }), code });
   } finally {
+    if (incremented) ttsActive = Math.max(0, ttsActive - 1);
     if (tmpPath) {
       await fs.unlink(tmpPath).catch(() => {});
     }
   }
+});
+
+// Centralized JSON error handler — prevents HTML leaks for CORS/parse errors
+app.use((err, _req, res, _next) => {
+  if (err?.type === "entity.too.large" || err?.status === 413) {
+    return res.status(413).json({ error: "Payload too large", code: "PAYLOAD_TOO_LARGE" });
+  }
+  if (err?.message === "CORS not allowed") {
+    return res.status(403).json({ error: "Origin not allowed", code: "CORS_FORBIDDEN" });
+  }
+  console.error("[error-middleware]", err);
+  const isProd = process.env.NODE_ENV === "production";
+  res.status(err?.status || 500).json({
+    error: "Internal server error",
+    ...(isProd ? {} : { details: err?.message?.slice(0, 500) }),
+    code: "INTERNAL_ERROR",
+  });
+});
+
+// JSON 404 for unknown routes
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found", code: "NOT_FOUND" });
 });
 
 const server = app.listen(PORT, "0.0.0.0", () => {

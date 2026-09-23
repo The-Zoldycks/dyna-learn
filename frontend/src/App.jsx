@@ -36,7 +36,7 @@ import { useImageAttachment } from "./hooks/useImageAttachment.js";
 import { useSessions } from "./hooks/useSessions.js";
 import { useSRS } from "./hooks/useSRS.js";
 import { getLayoutedElements } from "./utils/layout.js";
-import { updateStreakOnLoad, saveSnapshot, logHighlightToSRS, updateSRSItem } from "./utils/storage.js";
+import { updateStreakOnLoad, saveSnapshot } from "./utils/storage.js";
 import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
 import { track } from "./utils/analytics.js";
 
@@ -78,14 +78,51 @@ function sessionWrite(key, value) {
   try {
     write(localStorage);
   } catch {
-    // Quota exceeded — retry with a trimmed payload, then give up silently
-    try {
-      const trimmed = Array.isArray(value) ? value.slice(-6) : value;
-      localStorage.setItem(key, JSON.stringify(trimmed));
-    } catch {
+    // Quota exceeded — handle per-key to avoid corrupting graph topology
+    if (key === SESSION_CHAT) {
       try {
-        const minimal = Array.isArray(value) ? value.slice(-2) : value;
-        localStorage.setItem(key, JSON.stringify(minimal));
+        const trimmed = Array.isArray(value) ? value.slice(-6) : value;
+        localStorage.setItem(key, JSON.stringify(trimmed));
+      } catch {
+        try {
+          const minimal = Array.isArray(value) ? value.slice(-2) : value;
+          localStorage.setItem(key, JSON.stringify(minimal));
+        } catch {}
+      }
+      return;
+    }
+    // For canvas keys: try to free space by evicting oldest snapshot, then retry once
+    try {
+      const snapsRaw = localStorage.getItem("dyna-snapshots");
+      if (snapsRaw) {
+        const snaps = JSON.parse(snapsRaw);
+        if (snaps.length) {
+          snaps.pop();
+          localStorage.setItem("dyna-snapshots", JSON.stringify(snaps));
+          localStorage.setItem(key, JSON.stringify(value));
+          return;
+        }
+      }
+    } catch {}
+    // Last resort: keep topology valid
+    if (key === SESSION_NODES && Array.isArray(value) && value.length > 30) {
+      try {
+        const trimmedNodes = value.slice(-30);
+        const nodeIds = new Set(trimmedNodes.map((n) => n.id));
+        const edgesRaw = localStorage.getItem(SESSION_EDGES);
+        if (edgesRaw) {
+          const edges = JSON.parse(edgesRaw);
+          const filtered = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+          localStorage.setItem(SESSION_EDGES, JSON.stringify(filtered));
+        }
+        localStorage.setItem(key, JSON.stringify(trimmedNodes));
+      } catch {}
+    } else if (key === SESSION_EDGES && Array.isArray(value)) {
+      try {
+        const nodesRaw = localStorage.getItem(SESSION_NODES);
+        const nodeIds = nodesRaw ? new Set(JSON.parse(nodesRaw).map((n) => n.id)) : null;
+        const filtered = nodeIds ? value.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target)) : value.slice(-50);
+        localStorage.setItem(key, JSON.stringify(filtered));
       } catch {}
     }
   }
@@ -156,6 +193,7 @@ export default function App() {
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   // Collapsible audio panels — collapsed by default so the tutor response area stays clean
@@ -175,6 +213,7 @@ export default function App() {
     signUpWithPassword,
     logout,
     requestPasswordReset,
+    updatePassword,
   } = useAuth();
 
   const recognitionRef = useRef(null);
@@ -183,9 +222,26 @@ export default function App() {
   const lastPayloadRef = useRef(null);
   const reactFlowInstanceRef = useRef(null); // imperative fitView
   const chatBottomRef = useRef(null);         // auto-scroll sentinel
+  const nodesRef = useRef(null);
+  const edgesRef = useRef(null);
+  const chatHistoryRef = useRef(null);
 
+  // Keep refs in sync for stable diagram callbacks and unload flush
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => { chatHistoryRef.current = chatHistory; }, [chatHistory]);
+
+  // Streak increments only on learning (first successful tutor response per day), not on page load
+
+  // Detect password recovery link (?reset=1 or hash type=recovery) and open reset modal
   useEffect(() => {
-    updateStreakOnLoad();
+    const params = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
+    const hasReset = params.get("reset") === "1" || hash.includes("type=recovery") || window.location.search.includes("type=recovery") || (hash.includes("access_token") && hash.includes("recovery"));
+    if (hasReset) {
+      setAuthModalMode("reset");
+      setAuthModalOpen(true);
+    }
   }, []);
 
   // ---- Share URL parsing on mount ----
@@ -256,16 +312,52 @@ export default function App() {
   }, [edges]);
   useEffect(() => {
     const t = setTimeout(() => {
-      // Strip image dataUrls before persisting — one 5MB upload would blow the sessionStorage quota
-      const lean = chatHistory.map((turn) => {
+      // Persist chat but keep only recent image thumbnails (blob URLs die on reload)
+      const lean = chatHistory.map((turn, idx) => {
         if (!turn.image) return turn;
-        const { image: _image, ...rest } = turn;
-        return rest;
+        const isRecent = idx >= chatHistory.length - 3;
+        if (!isRecent) {
+          const { image: _image, ...rest } = turn;
+          return rest;
+        }
+        // Blob URLs don't survive reload — drop them, keep data URLs
+        if (String(turn.image).startsWith("blob:")) {
+          const { image: _image, ...rest } = turn;
+          return rest;
+        }
+        return turn;
       });
       sessionWrite(SESSION_CHAT, lean);
     }, 300);
     return () => clearTimeout(t);
   }, [chatHistory]);
+
+  // Flush to localStorage synchronously on tab close (debounced writes may not have fired)
+  useEffect(() => {
+    const handler = () => {
+      try {
+        const n = nodesRef.current;
+        const e = edgesRef.current;
+        const c = chatHistoryRef.current;
+        if (n) localStorage.setItem(SESSION_NODES, JSON.stringify(n));
+        if (e) localStorage.setItem(SESSION_EDGES, JSON.stringify(e));
+        if (c) {
+          const lean = c.map((turn) => {
+            if (!turn.image) return turn;
+            if (String(turn.image).startsWith("blob:")) {
+              const { image: _image, ...rest } = turn;
+              return rest;
+            }
+            return turn;
+          });
+          const toStore = lean.length > 6 ? lean.slice(-6) : lean;
+          localStorage.setItem(SESSION_CHAT, JSON.stringify(toStore));
+        }
+      } catch {}
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
 
   // ---- Auto-scroll chat to latest message (instantly if reduced motion) ----
   useEffect(() => {
@@ -476,48 +568,44 @@ export default function App() {
     const { action, nodes: newNodes, edges: newEdges } = diagramUpdate;
     const formattedNodes = formatNodes(newNodes);
     const formattedEdges = formatEdges(newEdges);
+    const curNodes = nodesRef.current ?? nodes;
+    const curEdges = edgesRef.current ?? edges;
 
     switch (action) {
       case "add_nodes": {
-        setNodes((prev) => {
-          // Point 6: Remove the welcome node when real explanations populate the canvas
-          const isOnlyStart = prev.length === 1 && prev[0].id === "start";
-          const baseNodes = isOnlyStart ? [] : prev;
-          
-          const existingIds = new Set(baseNodes.map((n) => n.id));
-          const toAdd = formattedNodes.filter((n) => !existingIds.has(n.id));
-          const merged = [...baseNodes, ...toAdd];
-          
-          setEdges((prevEdges) => {
-            const edgeIds = new Set(prevEdges.map((e) => e.id));
-            const newValid = formattedEdges.filter((e) => !edgeIds.has(e.id));
-            const combinedEdges = [...prevEdges, ...newValid];
-            const { nodes: ln, edges: le } = getLayoutedElements(merged, combinedEdges, "TB");
-            setTimeout(() => {
-              setNodes(ln); setEdges(le);
-              setTimeout(() => triggerFitView(), 60);
-            }, 0);
-            return prevEdges;
-          });
-          return prev;
-        });
+        const isOnlyStart = curNodes.length === 1 && curNodes[0].id === "start";
+        const baseNodes = isOnlyStart ? [] : curNodes;
+        const existingIds = new Set(baseNodes.map((n) => n.id));
+        const toAdd = formattedNodes.filter((n) => !existingIds.has(n.id));
+        if (!toAdd.length && !formattedEdges.length) return;
+        const merged = [...baseNodes, ...toAdd];
+        const edgeIds = new Set(curEdges.map((e) => e.id));
+        const filteredEdges = isOnlyStart ? curEdges.filter((e) => e.source !== "start" && e.target !== "start") : curEdges;
+        const newValid = formattedEdges.filter((e) => !edgeIds.has(e.id));
+        const combined = [...filteredEdges, ...newValid];
+        const valid = combined.filter((e) => merged.some((n) => n.id === e.source) && merged.some((n) => n.id === e.target));
+        const { nodes: ln, edges: le } = getLayoutedElements(merged, valid, "TB");
+        setNodes(ln);
+        setEdges(le);
+        setTimeout(() => triggerFitView(), 60);
         break;
       }
       case "add_edges": {
-        setEdges((prev) => {
-          const ids = new Set(prev.map((e) => e.id));
-          return [...prev, ...formattedEdges.filter((e) => !ids.has(e.id))];
-        });
-        if (formattedNodes.length) {
-          setNodes((prev) => {
-            const ids = new Set(prev.map((n) => n.id));
-            const toAdd = formattedNodes.filter((n) => !ids.has(n.id));
-            if (!toAdd.length) return prev;
-            const merged = [...prev, ...toAdd];
-            const { nodes: ln, edges: le } = getLayoutedElements(merged, edges, "TB");
-            setEdges(le);
-            return ln;
-          });
+        const ids = new Set(curEdges.map((e) => e.id));
+        const toAddE = formattedEdges.filter((e) => !ids.has(e.id));
+        if (!toAddE.length && !formattedNodes.length) return;
+        const nodeIds = new Set(curNodes.map((n) => n.id));
+        const toAddN = formattedNodes.filter((n) => !nodeIds.has(n.id));
+        const mergedN = toAddN.length ? [...curNodes, ...toAddN] : curNodes;
+        const combined = [...curEdges, ...toAddE];
+        const valid = combined.filter((e) => mergedN.some((n) => n.id === e.source) && mergedN.some((n) => n.id === e.target));
+        if (toAddN.length) {
+          const { nodes: ln, edges: le } = getLayoutedElements(mergedN, valid, "TB");
+          setNodes(ln);
+          setEdges(le);
+          setTimeout(() => triggerFitView(), 60);
+        } else {
+          setEdges(valid);
         }
         break;
       }
@@ -529,17 +617,10 @@ export default function App() {
             if (existing) {
               const updatedData = { ...existing.data, ...n.data };
               map.set(n.id, { ...existing, data: updatedData });
-              
-              // Log confusion to SRS (cloud for logged-in, local for guests)
-              if (n.data?.highlight && updatedData.label) {
-                logCard(n.id, updatedData.label);
-              }
-            }
-            else {
+              if (n.data?.highlight && updatedData.label) logCard(n.id, updatedData.label);
+            } else {
               map.set(n.id, n);
-              if (n.data?.highlight && n.data?.label) {
-                logCard(n.id, n.data.label);
-              }
+              if (n.data?.highlight && n.data?.label) logCard(n.id, n.data.label);
             }
           });
           return Array.from(map.values());
@@ -550,7 +631,6 @@ export default function App() {
             return [...prev, ...formattedEdges.filter((e) => !ids.has(e.id))];
           });
         }
-        // Auto-fitView to highlighted nodes so they're always visible
         const highlightedIds = formattedNodes.filter((n) => n.data?.highlight).map((n) => n.id);
         if (highlightedIds.length) setTimeout(() => triggerFitView(highlightedIds), 150);
         break;
@@ -564,56 +644,44 @@ export default function App() {
         break;
       case "create":
       case "append": {
-        setNodes((prev) => {
-          const isOnlyStart = prev.length === 1 && prev[0].id === "start";
-          const baseNodes = isOnlyStart ? [] : prev;
-          
-          const ids = new Set(baseNodes.map((n) => n.id));
-          const toAdd = formattedNodes.filter((n) => !ids.has(n.id));
-          const merged = [...baseNodes, ...toAdd];
-          setEdges((prevE) => {
-            const eIds = new Set(prevE.map((e) => e.id));
-            const eAdd = formattedEdges.filter((e) => !eIds.has(e.id));
-            const combined = [...prevE, ...eAdd];
-            const { nodes: ln, edges: le } = getLayoutedElements(merged, combined, "TB");
-            setTimeout(() => {
-              setNodes(ln); setEdges(le);
-              setTimeout(() => triggerFitView(), 60);
-            }, 0);
-            return prevE;
-          });
-          return prev;
-        });
+        const isOnlyStart = curNodes.length === 1 && curNodes[0].id === "start";
+        const baseNodes = isOnlyStart ? [] : curNodes;
+        const ids = new Set(baseNodes.map((n) => n.id));
+        const toAdd = formattedNodes.filter((n) => !ids.has(n.id));
+        if (!toAdd.length && !formattedEdges.length) return;
+        const merged = [...baseNodes, ...toAdd];
+        const eIds = new Set(curEdges.map((e) => e.id));
+        const eAdd = formattedEdges.filter((e) => !eIds.has(e.id));
+        const combined = [...curEdges.filter((e) => !(isOnlyStart && (e.source === "start" || e.target === "start"))), ...eAdd];
+        const valid = combined.filter((e) => merged.some((n) => n.id === e.source) && merged.some((n) => n.id === e.target));
+        const { nodes: ln, edges: le } = getLayoutedElements(merged, valid, "TB");
+        setNodes(ln);
+        setEdges(le);
+        setTimeout(() => triggerFitView(), 60);
         break;
       }
       case "none":
       default:
         if (formattedNodes.length || formattedEdges.length) {
-          setNodes((prev) => {
-            const ids = new Set(prev.map((n) => n.id));
-            const toAdd = formattedNodes.filter((n) => !ids.has(n.id));
-            if (!toAdd.length && !formattedEdges.length) return prev;
-            const merged = [...prev, ...toAdd];
-            setEdges((prevE) => {
-              const eIds = new Set(prevE.map((e) => e.id));
-              const eAdd = formattedEdges.filter((e) => !eIds.has(e.id));
-              const combined = [...prevE, ...eAdd];
-              const nodeIds = new Set(merged.map((n) => n.id));
-              const valid = combined.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
-              const { nodes: ln, edges: le } = getLayoutedElements(merged, valid, "TB");
-              setTimeout(() => {
-                setNodes(ln); setEdges(le);
-                setTimeout(() => triggerFitView(), 60);
-              }, 0);
-              return prevE;
-            });
-            return prev;
-          });
+          const ids = new Set(curNodes.map((n) => n.id));
+          const toAdd = formattedNodes.filter((n) => !ids.has(n.id));
+          if (!toAdd.length && !formattedEdges.length) return;
+          const merged = [...curNodes, ...toAdd];
+          const eIds = new Set(curEdges.map((e) => e.id));
+          const eAdd = formattedEdges.filter((e) => !eIds.has(e.id));
+          const combined = [...curEdges, ...eAdd];
+          const nodeIds = new Set(merged.map((n) => n.id));
+          const valid = combined.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+          const { nodes: ln, edges: le } = getLayoutedElements(merged, valid, "TB");
+          setNodes(ln);
+          setEdges(le);
+          setTimeout(() => triggerFitView(), 60);
         }
         break;
     }
+  // nodes/edges via refs to avoid recreating on every keystroke
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formatNodes, formatEdges, applyLayoutAndSet, edges, triggerFitView]);
+  }, [formatNodes, formatEdges, applyLayoutAndSet, triggerFitView]);
 
   const applyDiagramUpdateStable = useCallback((update) => {
     if (
@@ -627,35 +695,27 @@ export default function App() {
     if (update.action === "add_nodes") {
       const fN = formatNodes(update.nodes);
       const fE = formatEdges(update.edges);
-      setNodes((prevNodes) => {
-        // Strip the initial welcome node as soon as real lesson nodes arrive
-        const baseNodes = fN.length > 0 ? prevNodes.filter((n) => n.id !== "start") : prevNodes;
-        const ids = new Set(baseNodes.map((n) => n.id));
-        const toAdd = fN.filter((n) => !ids.has(n.id));
-        const mergedNodes = [...baseNodes, ...toAdd];
-        setEdges((prevEdges) => {
-          const baseEdges = prevEdges.filter((e) => e.source !== "start" && e.target !== "start");
-          const eIds = new Set(baseEdges.map((e) => e.id));
-          const toAddE = fE.filter(
-            (e) =>
-              !eIds.has(e.id) &&
-              mergedNodes.some((n) => n.id === e.source) &&
-              mergedNodes.some((n) => n.id === e.target)
-          );
-          const mergedEdges = [...baseEdges, ...toAddE];
-          const laid = getLayoutedElements(mergedNodes, mergedEdges, "TB");
-          setTimeout(() => {
-            setNodes(laid.nodes); setEdges(laid.edges);
-            setTimeout(() => triggerFitView(), 60);
-          }, 0);
-          return prevEdges;
-        });
-        return prevNodes;
-      });
+      const curNodes = nodesRef.current ?? nodes;
+      const curEdges = edgesRef.current ?? edges;
+      const baseNodes = fN.length > 0 ? curNodes.filter((n) => n.id !== "start") : curNodes;
+      const ids = new Set(baseNodes.map((n) => n.id));
+      const toAdd = fN.filter((n) => !ids.has(n.id));
+      if (!toAdd.length && !fE.length) return;
+      const mergedNodes = [...baseNodes, ...toAdd];
+      const baseEdges = curEdges.filter((e) => e.source !== "start" && e.target !== "start");
+      const eIds = new Set(baseEdges.map((e) => e.id));
+      const toAddE = fE.filter((e) => !eIds.has(e.id) && mergedNodes.some((n) => n.id === e.source) && mergedNodes.some((n) => n.id === e.target));
+      const mergedEdges = [...baseEdges, ...toAddE];
+      const laid = getLayoutedElements(mergedNodes, mergedEdges, "TB");
+      setNodes(laid.nodes);
+      setEdges(laid.edges);
+      setTimeout(() => triggerFitView(), 60);
       return;
     }
     return applyDiagramUpdate(update);
-  }, [applyDiagramUpdate, formatNodes, formatEdges, setNodes, setEdges, triggerFitView]);
+  // nodes/edges via refs
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyDiagramUpdate, formatNodes, formatEdges, triggerFitView]);
 
   // ---- Main tutor call ----
   const executeTutor = useCallback(async (payload, retryLabel) => {
@@ -688,15 +748,23 @@ export default function App() {
           }
         }
         setChatHistory((prev) => {
+          const userImage = payload.image?.base64
+            ? `data:${payload.image.mimeType};base64,${payload.image.base64}`
+            : (payload.image?.previewUrl || null);
           const next = [
             ...prev,
-            { role: "user", text: payload.studentQuestion, image: payload.image?.previewUrl || null },
+            { role: "user", text: payload.studentQuestion, image: userImage },
             { role: "model", text: speech_text || "", quiz: quiz || null }
           ];
-          return next.slice(-6);
+          return next.slice(-50);
         });
       } else {
-        setChatHistory((prev) => [...prev, { role: "user", text: payload.studentQuestion, image: payload.image?.previewUrl || null }].slice(-6));
+        setChatHistory((prev) => {
+          const userImage = payload.image?.base64
+            ? `data:${payload.image.mimeType};base64,${payload.image.base64}`
+            : (payload.image?.previewUrl || null);
+          return [...prev, { role: "user", text: payload.studentQuestion, image: userImage }].slice(-50);
+        });
       }
 
       if (diagram_update && diagram_update.action !== "quiz") {
@@ -705,26 +773,30 @@ export default function App() {
       if (retryLabel) toast.dismiss();
       track("question_asked", { hasImage: !!payload.image, nodeSelected: !!payload.selectedNodeId });
       triggerIdleAutoSave();
+      updateStreakOnLoad();
       return true;
     } catch (err) {
       console.error(err);
       const code = err.code || "";
       const isRateLimit =
-        code === "GEMINI_RATE_LIMIT" ||
+        code === "GEMINI_RATE_LIMIT" || code === "TUTOR_RATE_LIMIT" || code === "GUEST_DAILY_LIMIT" || code === "TTS_RATE_LIMIT" || code === "TTS_CONCURRENCY_LIMIT" ||
         (err.message || "").includes("429") ||
         (err.message || "").includes("rate limit");
-      const isTimeout = err.name === "TimeoutError" || err.name === "AbortError";
+      const isBudget = code === "BUDGET_EXHAUSTED";
+      const isTimeout = err.name === "TimeoutError" || err.name === "AbortError" || code === "TUTOR_TIMEOUT";
       const isNetwork =
         err instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(err.message || "");
-      const description = isRateLimit
-        ? "Gemini free-tier limit hit — wait ~20s before retrying."
-        : isTimeout
-          ? "Request timed out after 90s — backend may be busy. Retry in a moment."
-          : isNetwork
-            ? "Cannot reach backend — check your internet connection, then Retry."
-            : err.message || "Failed to fetch tutor response";
+      const description = isBudget
+        ? "Monthly budget exhausted — try again next month or contact the owner."
+        : isRateLimit
+          ? code === "GUEST_DAILY_LIMIT" ? "Guest daily limit (40) hit — sign in for higher limits." : code === "TUTOR_RATE_LIMIT" ? "Too many requests — wait a minute and retry." : "Rate limit hit — wait ~20s before retrying."
+          : isTimeout
+            ? "Request timed out — backend may be busy. Retry in a moment."
+            : isNetwork
+              ? "Cannot reach backend — check your internet connection, then Retry."
+              : err.message || "Failed to fetch tutor response";
 
-      toast.error(isRateLimit ? "Rate limit hit" : isNetwork || isTimeout ? "Connection problem" : "Tutor unavailable", {
+      toast.error(isBudget ? "Budget exhausted" : isRateLimit ? "Rate limit hit" : isNetwork || isTimeout ? "Connection problem" : "Tutor unavailable", {
         description,
         duration: Infinity,
         action: {
@@ -926,9 +998,18 @@ export default function App() {
 
       // ── Legacy hash-based share (guest or no saved session yet) ──
       const b64 = encodeShareHash(nodes, edges);
+      if (!b64) throw new Error("Failed to encode share link");
       const url = `${window.location.origin}${window.location.pathname}#s=${b64}`;
       if (url.length > 4000) {
-        throw new Error("Canvas is too large to share via URL. Sign in and save your session first to get a short cloud link.");
+        if (!user) {
+          toast.error("Canvas too large for guest link", {
+            description: "Sign in to save and share a short cloud link.",
+            duration: 6000,
+            action: { label: "Sign in", onClick: () => { setAuthModalMode(null); setAuthModalOpen(true); } },
+          });
+          return;
+        }
+        throw new Error("Canvas is too large to share via URL. Save your session first to get a short cloud link.");
       }
 
       // Prefer native share with PNG on mobile
@@ -1831,11 +1912,13 @@ export default function App() {
         <Suspense fallback={null}>
           <AuthModal
             open={authModalOpen}
-            onClose={() => setAuthModalOpen(false)}
+            initialMode={authModalMode}
+            onClose={() => { setAuthModalOpen(false); setAuthModalMode(null); }}
             onLoginWithGoogle={loginWithGoogle}
             onLoginWithPassword={loginWithPassword}
             onSignUpWithPassword={signUpWithPassword}
             onRequestPasswordReset={requestPasswordReset}
+            onUpdatePassword={updatePassword}
           />
         </Suspense>
       )}

@@ -4,6 +4,7 @@ services:
     env: docker
     dockerfilePath: backend/Dockerfile
     dockerContext: backend
+    healthCheckPath: /healthz
     envVars:
       - key: PORT
         value: 3000
@@ -11,3 +12,5 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      - key: NODE_ENV
+        value: production

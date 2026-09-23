@@ -93,7 +93,7 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
       let migratedCount = 0;
       for (const snap of localSnaps) {
         try {
-          await supabase.from("study_sessions").insert({
+          const { error } = await supabase.from("study_sessions").insert({
             user_id: user.id,
             title: snap.title || "Migrated Lesson",
             nodes: snap.nodes || [],
@@ -101,6 +101,7 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
             chat_history: sanitizeChat(snap.chatHistory || []),
             version: 1,
           });
+          if (error) throw error;
           deleteLocalSnapshot(snap.id);
           migratedCount++;
         } catch (err) {
@@ -142,17 +143,20 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
       if (!targetNodes.length) return null;
       setIsSaving(true);
 
-      // Offline handling: queue locally if internet is down
+      // Offline handling: queue locally if internet is down (keyed per-user)
       if (!navigator.onLine && isConfigured) {
         try {
           const queue = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
-          queue.push({ id, title, nodes: targetNodes, edges: targetEdges, chat_history: targetChat, timestamp: Date.now() });
+          queue.push({ id: id || null, title: title || null, nodes: targetNodes, edges: targetEdges, chat_history: targetChat, version: activeSessionVersion, userId: user.id, timestamp: Date.now() });
           localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
           setLastSavedAt(new Date());
           setIsSaving(false);
           if (isManual) toast.info("Saved locally (offline). Will sync when reconnected.");
           return null;
-        } catch {}
+        } catch (err) {
+          console.warn("Failed to queue offline save:", err);
+          if (isManual) toast.error("Failed to queue offline save — storage full.");
+        }
       }
 
       if (!isConfigured) {
@@ -375,19 +379,23 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
     }, 25000); // 25s debounce
   }, [isConfigured, activeSessionId, saveSession]);
 
-  // Flush on beforeunload
+  // Flush on beforeunload — queue synchronously (async save never completes on unload)
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (isConfigured && activeSessionId) {
-        // Beacon or immediate sync attempt
-        saveSession({ id: activeSessionId });
-      }
+      if (!isConfigured || !activeSessionId) return;
+      try {
+        const { nodes: n, edges: e, chatHistory: c } = latestStateRef.current;
+        if (!n?.length) return;
+        const queue = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+        queue.push({ id: activeSessionId, title: null, nodes: n, edges: e, chat_history: sanitizeChat(c || []), version: activeSessionVersion, userId: user.id, timestamp: Date.now() });
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+      } catch {}
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isConfigured, activeSessionId, saveSession]);
+  }, [isConfigured, activeSessionId, activeSessionVersion, user, sanitizeChat]);
 
-  // Flush offline queue when returning online
+  // Flush offline queue when returning online (handles creates + updates with OCC)
   useEffect(() => {
     const handleOnline = async () => {
       if (!isConfigured) return;
@@ -395,23 +403,39 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
         const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
         if (!raw) return;
         const queue = JSON.parse(raw);
-        if (queue.length > 0) {
-          toast.info("Reconnected. Syncing offline changes to cloud...");
-          for (const item of queue) {
-            if (item.id) {
-              await supabase.from("study_sessions").update({
-                title: item.title,
-                nodes: item.nodes,
-                edges: item.edges,
-                chat_history: item.chat_history,
-                updated_at: new Date().toISOString(),
-              }).eq("id", item.id);
-            }
+        // Scope queue to current user — prevents leaking guest queue to another account
+        const myQueue = queue.filter((item) => !item.userId || item.userId === user.id);
+        const otherQueue = queue.filter((item) => item.userId && item.userId !== user.id);
+        if (myQueue.length === 0) return;
+        toast.info("Reconnected. Syncing offline changes to cloud...");
+        for (const item of myQueue) {
+          if (item.id) {
+            const { error } = await supabase.from("study_sessions").update({
+              title: item.title || undefined,
+              nodes: item.nodes,
+              edges: item.edges,
+              chat_history: item.chat_history,
+              version: (item.version || 1) + 1,
+              updated_at: new Date().toISOString(),
+            }).eq("id", item.id).eq("version", item.version || 1).select("id");
+            if (error) console.warn("Offline update failed:", error.message);
+          } else {
+            const { error } = await supabase.from("study_sessions").insert({
+              user_id: user.id,
+              title: item.title || inferSessionTitle(item.nodes, item.chat_history),
+              nodes: item.nodes || [],
+              edges: item.edges || [],
+              chat_history: item.chat_history || [],
+              version: 1,
+            });
+            if (error) console.warn("Offline create failed:", error.message);
           }
-          localStorage.removeItem(OFFLINE_QUEUE_KEY);
-          toast.success("Cloud sync complete ✓");
-          fetchSessions();
         }
+        // Keep other-user queue entries, discard mine
+        if (otherQueue.length) localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(otherQueue));
+        else localStorage.removeItem(OFFLINE_QUEUE_KEY);
+        toast.success("Cloud sync complete ✓");
+        fetchSessions();
       } catch (err) {
         console.warn("Failed to flush offline queue:", err);
       }
@@ -419,7 +443,7 @@ export function useSessions({ user, nodes, edges, chatHistory, onRestoreSession 
 
     window.addEventListener("online", handleOnline);
     return () => window.removeEventListener("online", handleOnline);
-  }, [isConfigured, fetchSessions]);
+  }, [isConfigured, user, fetchSessions]);
 
   // Conflict resolvers
   const resolveConflictReload = useCallback(() => {

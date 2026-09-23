@@ -60,6 +60,7 @@ function notifyAuthChange(event, session) {
 
 // Schedule token refresh before expiry
 let refreshTimer = null;
+let refreshInFlight = null;
 function scheduleTokenRefresh(session) {
   if (refreshTimer) clearTimeout(refreshTimer);
   if (!session?.expires_at) return;
@@ -77,31 +78,50 @@ function scheduleTokenRefresh(session) {
 
 async function refreshAccessToken(refreshToken) {
   if (!refreshToken || !isSupabaseConfigured()) return;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-    if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
-    const json = await res.json();
-    const newSession = {
-      access_token: json.access_token,
-      refresh_token: json.refresh_token,
-      expires_at: Math.floor(Date.now() / 1000) + json.expires_in,
-      user: json.user,
-    };
-    setStoredSession(newSession);
-    scheduleTokenRefresh(newSession);
-    notifyAuthChange("TOKEN_REFRESHED", newSession);
-  } catch (err) {
-    console.warn("Token refresh failed, signing out:", err);
-    setStoredSession(null);
-    notifyAuthChange("SIGNED_OUT", null);
-  }
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const msg = body.error_description || body.msg || `Refresh failed: ${res.status}`;
+        const isInvalidGrant = res.status === 400 && /invalid_grant/i.test(msg);
+        const err = new Error(msg);
+        err.status = res.status;
+        err.isInvalidGrant = isInvalidGrant;
+        throw err;
+      }
+      const json = await res.json();
+      const newSession = {
+        access_token: json.access_token,
+        refresh_token: json.refresh_token,
+        expires_at: Math.floor(Date.now() / 1000) + json.expires_in,
+        user: json.user,
+      };
+      setStoredSession(newSession);
+      scheduleTokenRefresh(newSession);
+      notifyAuthChange("TOKEN_REFRESHED", newSession);
+    } catch (err) {
+      if (err.isInvalidGrant || err.status === 401) {
+        console.warn("Token refresh failed — invalid grant, signing out:", err);
+        setStoredSession(null);
+        notifyAuthChange("SIGNED_OUT", null);
+      } else {
+        console.warn("Token refresh failed (transient):", err);
+      }
+      throw err;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
 }
 
 // Check for OAuth hash tokens (legacy implicit flow) on app load
@@ -174,6 +194,24 @@ if (typeof window !== "undefined") {
   }
 }
 
+// Cross-tab auth sync
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === AUTH_STORAGE_KEY) {
+      try {
+        const session = e.newValue ? JSON.parse(e.newValue) : null;
+        if (session?.access_token) {
+          scheduleTokenRefresh(session);
+          notifyAuthChange("SIGNED_IN", session);
+        } else {
+          if (refreshTimer) clearTimeout(refreshTimer);
+          notifyAuthChange("SIGNED_OUT", null);
+        }
+      } catch {}
+    }
+  });
+}
+
 // ── Auth Module ─────────────────────────────────────────────────────────────
 function generateCodeVerifier() {
   const array = new Uint8Array(32);
@@ -205,8 +243,9 @@ export const auth = {
 
       if (!res.ok) {
         if (res.status === 401 && session.refresh_token) {
-          // Try refresh once
-          await refreshAccessToken(session.refresh_token);
+          try {
+            await refreshAccessToken(session.refresh_token);
+          } catch {}
           const newSession = getStoredSession();
           if (newSession?.access_token) {
             const retry = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
@@ -221,8 +260,8 @@ export const auth = {
             }
           }
         }
-        if (res.status === 401) {
-          setStoredSession(null);
+        // Only clear session if it was already invalidated by refresh (invalid_grant)
+        if (!getStoredSession()) {
           notifyAuthChange("SIGNED_OUT", null);
         }
         return { data: { user: null }, error: new Error(`HTTP ${res.status}`) };
@@ -295,14 +334,22 @@ export const auth = {
     }
   },
 
-  signInWithOAuth({ provider = "google", redirectTo = window.location.origin }) {
+  async signInWithOAuth({ provider = "google", redirectTo = window.location.origin }) {
     if (!isSupabaseConfigured()) {
       return { error: new Error("Supabase is not configured.") };
     }
     const verifier = generateCodeVerifier();
     setPkceVerifier(verifier);
-    const challenge = verifier; // PKCE S256 not implemented for brevity; Supabase accepts plain verifier for PKCE
-    const targetUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=plain`;
+    let challenge = verifier;
+    let method = "plain";
+    try {
+      const data = new TextEncoder().encode(verifier);
+      const hash = await crypto.subtle.digest("SHA-256", data);
+      const hashArray = new Uint8Array(hash);
+      challenge = btoa(String.fromCharCode(...hashArray)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+      method = "S256";
+    } catch {}
+    const targetUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=${method}`;
     window.location.href = targetUrl;
     return { error: null };
   },
@@ -342,6 +389,24 @@ export const auth = {
     }
   },
 
+  async updateUser({ password }) {
+    if (!isSupabaseConfigured()) return { error: new Error("Supabase is not configured.") };
+    const session = getStoredSession();
+    if (!session?.access_token) return { error: new Error("No active session — please use the reset link again.") };
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ password }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: new Error(json.error_description || json.msg || json.message || "Failed to update password") };
+      return { error: null, data: json };
+    } catch (err) {
+      return { error: err };
+    }
+  },
+
   onAuthStateChange(callback) {
     authListeners.add(callback);
     const currentSession = getStoredSession();
@@ -373,6 +438,7 @@ constructor(table) {
     this.isSingle = false;
     this.returning = false;
     this._promise = null; // memoized execute promise
+    this._retried = false;
 
     const session = getStoredSession();
     if (session?.access_token) {
@@ -430,6 +496,7 @@ constructor(table) {
   }
 
   single() {
+    this._promise = null;
     this.isSingle = true;
     return this;
   }
@@ -470,15 +537,37 @@ constructor(table) {
         finalUrl += `${sep}select=id`;
       }
 
-      const response = await fetch(finalUrl, {
+      let response = await fetch(finalUrl, {
         method: this.method,
         headers: this.headers,
         body: this.body,
       });
 
+      // 401 retry once after refresh (covers expired access token during cloud saves)
+      if (response.status === 401 && !this._retried) {
+        const session = getStoredSession();
+        if (session?.refresh_token) {
+          try {
+            await refreshAccessToken(session.refresh_token);
+            const newSession = getStoredSession();
+            if (newSession?.access_token) {
+              this.headers.Authorization = `Bearer ${newSession.access_token}`;
+              this._retried = true;
+              response = await fetch(finalUrl, {
+                method: this.method,
+                headers: this.headers,
+                body: this.body,
+              });
+            }
+          } catch {}
+        }
+      }
+
       if (!response.ok) {
         const errorJson = await response.json().catch(() => ({}));
         const err = new Error(errorJson.message || errorJson.error || `HTTP ${response.status}`);
+        err.status = response.status;
+        err.details = errorJson;
         return { data: null, error: err };
       }
 
