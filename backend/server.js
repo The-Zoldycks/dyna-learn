@@ -39,9 +39,23 @@ let workingModel = null;
 let workingModelExpiresAt = 0;
 const WORKING_MODEL_TTL_MS = 10 * 60 * 1000;
 
-// Monthly budget guard — estimated spend, resets monthly
+// Monthly budget guard — estimated spend, resets on calendar-month boundary.
+// Persisted to disk so restarts don't reset the counter.
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+const BUDGET_STATE_PATH = path.join(os.tmpdir(), "dyna-budget.json");
 let monthlySpendUSD = 0;
-let monthlySpendResetAt = Date.now();
+let monthlySpendMonth = new Date().toISOString().slice(0, 7);
+try {
+  if (existsSync(BUDGET_STATE_PATH)) {
+    const saved = JSON.parse(readFileSync(BUDGET_STATE_PATH, "utf8"));
+    if (saved?.month === monthlySpendMonth) monthlySpendUSD = Number(saved.spend) || 0;
+  }
+} catch {}
+function persistBudget() {
+  try {
+    writeFileSync(BUDGET_STATE_PATH, JSON.stringify({ month: monthlySpendMonth, spend: monthlySpendUSD }));
+  } catch {}
+}
 function estimateTutorCostUSD(inputChars, outputChars) {
   const inputTokens = Math.ceil(inputChars / 4);
   const outputTokens = Math.ceil(outputChars / 4);
@@ -50,16 +64,22 @@ function estimateTutorCostUSD(inputChars, outputChars) {
 function checkBudgetOrThrow() {
   const cap = parseFloat(process.env.GEMINI_MONTHLY_CAP_USD || "");
   if (!cap || Number.isNaN(cap)) return;
-  // Reset monthly
-  if (Date.now() - monthlySpendResetAt > 30 * 24 * 60 * 60 * 1000) {
+  // Reset on calendar month boundary
+  const month = new Date().toISOString().slice(0, 7);
+  if (month !== monthlySpendMonth) {
+    monthlySpendMonth = month;
     monthlySpendUSD = 0;
-    monthlySpendResetAt = Date.now();
+    persistBudget();
   }
   if (monthlySpendUSD >= cap) {
     const err = new Error("Monthly budget exhausted");
     err.code = "BUDGET_EXHAUSTED";
     throw err;
   }
+}
+function recordSpend(usd) {
+  monthlySpendUSD += usd;
+  persistBudget();
 }
 
 // Guest daily cap (in-memory, per-IP)
@@ -134,7 +154,7 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: false,
   maxAge: 86400,
 }));
@@ -191,7 +211,7 @@ app.post("/api/tutor", async (req, res) => {
       image = null,
     } = req.body;
 
-    if (!studentQuestion || typeof studentQuestion !== "string") {
+    if (!studentQuestion || typeof studentQuestion !== "string" || !studentQuestion.trim()) {
       return res.status(400).json({ error: "studentQuestion is required", code: "VALIDATION_ERROR" });
     }
     // Support both legacy flowchartState and new canvasState (monorepo contract)
@@ -426,6 +446,9 @@ Rules:
 
     // Inject Multimodal image if provided — allowlist mime types, cap base64 size (7MB base64 ~ 5MB binary)
     const IMAGE_ALLOWLIST = ["image/png", "image/jpeg", "image/webp"];
+    if (image && (image.base64 || image.mimeType) && !(image.base64 && image.mimeType)) {
+      return res.status(400).json({ error: "Incomplete image payload (base64 + mimeType required)", code: "VALIDATION_ERROR" });
+    }
     if (image && image.base64 && image.mimeType) {
       if (!IMAGE_ALLOWLIST.includes(image.mimeType)) {
         return res.status(400).json({ error: "Unsupported image type (png/jpeg/webp only)", code: "VALIDATION_ERROR" });
@@ -459,7 +482,10 @@ Rules:
       : [GEMINI_MODEL, ...FALLBACK_MODELS.filter((m) => m !== GEMINI_MODEL)];
     const candidates = [...new Set(ordered)];
 
-    const overallTimeout = new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Tutor request timed out after 25s"), { code: "TUTOR_TIMEOUT" })), 25000));
+    let overallTimer = null;
+    const overallTimeout = new Promise((_, reject) => {
+      overallTimer = setTimeout(() => reject(Object.assign(new Error("Tutor request timed out after 25s"), { code: "TUTOR_TIMEOUT" })), 25000);
+    });
     const runFallback = async () => {
       for (let i = 0; i < candidates.length; i++) {
         const model = candidates[i];
@@ -472,7 +498,7 @@ Rules:
               systemInstruction,
               responseMimeType: "application/json",
               responseSchema,
-              httpOptions: { timeout: 30000 },
+              httpOptions: { timeout: 20000 },
             },
           });
           console.log(`[tutor] success with model: ${model}`);
@@ -499,12 +525,14 @@ Rules:
       await Promise.race([runFallback(), overallTimeout]);
     } catch (e) {
       if (!response) throw e;
+    } finally {
+      if (overallTimer) clearTimeout(overallTimer);
     }
     if (!response) throw lastError || new Error("All Gemini models failed");
     try {
       const outChars = (response.text || "").length;
       const inChars = JSON.stringify(contents).length + systemInstruction.length;
-      monthlySpendUSD += estimateTutorCostUSD(inChars, outChars);
+      recordSpend(estimateTutorCostUSD(inChars, outChars));
     } catch {}
 
     // Extract text - SDK returns response.text
@@ -520,6 +548,9 @@ Rules:
     }
 
     const parsed = JSON.parse(resultText);
+    if (!parsed || typeof parsed !== "object" || (!parsed.speech_text && !parsed.quiz)) {
+      throw Object.assign(new Error("Model returned an empty shape"), { code: "JSON_SHAPE_ERROR" });
+    }
 
     res.json(parsed);
   } catch (error) {
@@ -534,7 +565,7 @@ Rules:
     }
     const isProd = process.env.NODE_ENV === "production";
     let status = 500;
-    if (code === "GEMINI_RATE_LIMIT" || code === "GUEST_DAILY_LIMIT") status = 429;
+    if (code === "GEMINI_RATE_LIMIT" || code === "GUEST_DAILY_LIMIT" || code === "TUTOR_RATE_LIMIT") status = 429;
     else if (code === "BUDGET_EXHAUSTED" || code === "TUTOR_TIMEOUT" || code === "GEMINI_UNAVAILABLE") status = 503;
     else if (code === "GEMINI_MODEL_NOT_FOUND") status = 404;
     res.status(status).json({
@@ -559,14 +590,20 @@ const EDGE_VOICE_FALLBACK = [
   { id: "en-US-JennyNeural", label: "Jenny — Female (en-US)", lang: "en-US", gender: "Female", locale: "en-US" },
 ];
 
-// In-memory voices cache (1h TTL) — avoids hitting Bing on every page load
+// In-memory voices cache (1h TTL) — avoids hitting Bing on every page load.
+// Failures are negatively cached for 5min so a Bing outage doesn't thundering-herd.
 let voicesCache = { at: 0, voices: null };
+let voicesFailureAt = 0;
 const VOICES_TTL_MS = 60 * 60 * 1000;
+const VOICES_FAILURE_TTL_MS = 5 * 60 * 1000;
 
 app.get("/api/tts/voices", async (req, res) => {
   try {
     if (voicesCache.voices && Date.now() - voicesCache.at < VOICES_TTL_MS) {
       return res.json({ voices: voicesCache.voices, mode: "edge", count: voicesCache.voices.length, cached: true });
+    }
+    if (voicesFailureAt && Date.now() - voicesFailureAt < VOICES_FAILURE_TTL_MS) {
+      return res.json({ voices: EDGE_VOICE_FALLBACK, mode: "edge-fallback", count: EDGE_VOICE_FALLBACK.length, cached: true });
     }
     const resp = await fetch(EDGE_VOICE_LIST_URL, { signal: AbortSignal.timeout(8000) });
     if (!resp.ok) throw new Error(`voices ${resp.status}`);
@@ -582,6 +619,7 @@ app.get("/api/tts/voices", async (req, res) => {
     throw new Error("empty");
   } catch (e) {
     console.warn("[tts] getVoices failed, using fallback:", e.message);
+    voicesFailureAt = Date.now();
     res.json({ voices: EDGE_VOICE_FALLBACK, mode: "edge-fallback", count: EDGE_VOICE_FALLBACK.length });
   }
 });
@@ -589,43 +627,56 @@ app.get("/api/tts/voices", async (req, res) => {
 app.post("/api/tts", async (req, res) => {
   let tmpPath = null;
   let incremented = false;
+  let ttsSettled = false;
+  const markSettled = () => { ttsSettled = true; };
   try {
     if (ttsActive >= TTS_MAX_CONCURRENT) {
       return res.status(429).json({ error: "Too many concurrent TTS requests — try again shortly", code: "TTS_CONCURRENCY_LIMIT" });
     }
-    ttsActive++; incremented = true;
     const { text, voice = "en-US-AriaNeural", rate = "+0%", volume = "+0%", pitch = "+0Hz" } = req.body || {};
     if (!text || !text.trim()) return res.status(400).json({ error: "text required", code: "TTS_TEXT_REQUIRED" });
-    
+
     // Validate voice format: en-US-AriaNeural pattern
     const VOICE_RE = /^[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural$/;
     if (!VOICE_RE.test(voice)) return res.status(400).json({ error: "invalid voice", code: "TTS_VOICE_INVALID" });
-    
-    // Validate rate: +0% to +100%, -50% to +0%
+
+    // Validate rate/volume/pitch ranges (backend clamps match SSML limits)
     const RATE_RE = /^[+-](\d{1,3})%$/;
     if (!RATE_RE.test(rate)) return res.status(400).json({ error: "invalid rate format (e.g. +10%, -20%)", code: "TTS_RATE_INVALID" });
     const rateVal = parseInt(rate.slice(0, -1), 10);
     if (rateVal > 100 || rateVal < -50) return res.status(400).json({ error: "rate out of range [-50%, +100%]", code: "TTS_RATE_INVALID" });
-    
-    // Validate volume: similar pattern
+
     const VOLUME_RE = /^[+-]\d{1,3}%$/;
     if (!VOLUME_RE.test(volume)) return res.status(400).json({ error: "invalid volume format", code: "TTS_VOLUME_INVALID" });
-    
-    // Validate pitch: +0Hz, +5Hz, -5Hz
+    const volumeVal = parseInt(volume.slice(0, -1), 10);
+    if (volumeVal > 100 || volumeVal < -50) return res.status(400).json({ error: "volume out of range [-50%, +100%]", code: "TTS_VOLUME_INVALID" });
+
     const PITCH_RE = /^[+-]\d+Hz$/;
     if (!PITCH_RE.test(pitch)) return res.status(400).json({ error: "invalid pitch format (e.g. +5Hz)", code: "TTS_PITCH_INVALID" });
-    
+    const pitchVal = parseInt(pitch.slice(0, -2), 10);
+    if (pitchVal > 50 || pitchVal < -50) return res.status(400).json({ error: "pitch out of range [-50Hz, +50Hz]", code: "TTS_PITCH_INVALID" });
+
+    // Occupy a synthesis slot only after validation passes
+    ttsActive++; incremented = true;
     const trimmed = text.slice(0, 5000);
     if (trimmed.length !== text.length) console.log(`[tts] truncated ${text.length} -> 5000 chars`);
     console.log(`[tts] synthesize voice=${voice} rate=${rate} volume=${volume} pitch=${pitch} len=${trimmed.length}`);
     // node-edge-tts writes to file, so create temp file — use async read to avoid blocking event loop
     tmpPath = path.join(os.tmpdir(), `dyna-tts-${crypto.randomUUID()}.mp3`);
     const ttsEngine = new EdgeTTS({ voice, rate, volume, pitch });
-    // 15s timeout on synthesis
+    // 15s timeout on synthesis — wait for the loser to settle before unlinking
+    // so a zombie synthesis can't race the file delete.
+    const synth = ttsEngine.ttsPromise(trimmed, tmpPath).then(markSettled, markSettled);
     await Promise.race([
-      ttsEngine.ttsPromise(trimmed, tmpPath),
+      synth,
       new Promise((_, reject) => setTimeout(() => reject(new Error("TTS timeout")), 15000)),
     ]);
+    // If we timed out, wait for the zombie to finish writing before reading/unlinking
+    if (!ttsSettled) {
+      try {
+        await Promise.race([synth, new Promise((r) => setTimeout(r, 5000))]);
+      } catch {}
+    }
     const audioBuffer = await fs.readFile(tmpPath);
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "private, max-age=3600");
@@ -649,10 +700,16 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
-// Centralized JSON error handler — prevents HTML leaks for CORS/parse errors
+// Centralized JSON error handler — prevents HTML leaks for CORS/parse errors.
+// NOTE: conventional order is 404-handler first, then this error handler;
+// Express only invokes 4-arg middleware via next(err), so normal 404s below
+// correctly skip this block either way.
 app.use((err, _req, res, _next) => {
   if (err?.type === "entity.too.large" || err?.status === 413) {
     return res.status(413).json({ error: "Payload too large", code: "PAYLOAD_TOO_LARGE" });
+  }
+  if (err instanceof SyntaxError && err.status === 400) {
+    return res.status(400).json({ error: "Malformed JSON body", code: "BAD_JSON" });
   }
   if (err?.message === "CORS not allowed") {
     return res.status(403).json({ error: "Origin not allowed", code: "CORS_FORBIDDEN" });

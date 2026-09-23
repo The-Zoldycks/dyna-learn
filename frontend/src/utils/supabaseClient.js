@@ -18,6 +18,15 @@ export function isSupabaseConfigured() {
 }
 
 // ── Token Storage Helpers ───────────────────────────────────────────────────
+// Current access token for backend calls (activates the signed-in tier;
+// absence means the guest daily cap applies).
+export function getAccessToken() {
+  try {
+    return getStoredSession()?.access_token || null;
+  } catch {
+    return null;
+  }
+}
 function getStoredSession() {
   try {
     const raw = localStorage.getItem(AUTH_STORAGE_KEY);

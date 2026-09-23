@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { stripMarkdown } from "../utils/speechText";
+import { getAccessToken } from "../utils/supabaseClient";
 
 const SPEEDS = [1, 1.25, 1.5, 2];
 
@@ -95,9 +96,13 @@ export function useTTS(apiBase) {
       window.speechSynthesis?.cancel();
       setIsTTSLoading(true); setIsSpeaking(false); setIsPaused(false);
 
+      const token = getAccessToken();
       const res = await fetch(`${apiBase}/api/tts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ text: text.slice(0, 5000), voice: selectedVoice, rate: edgeRate(playbackSpeed) }),
         signal: AbortSignal.timeout(20000),
       });

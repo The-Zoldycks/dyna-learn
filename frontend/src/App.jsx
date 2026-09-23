@@ -39,6 +39,7 @@ import { getLayoutedElements } from "./utils/layout.js";
 import { updateStreakOnLoad, saveSnapshot } from "./utils/storage.js";
 import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
 import { track } from "./utils/analytics.js";
+import { getAccessToken } from "./utils/supabaseClient.js";
 
 const nodeTypes = { custom: CustomNode };
 
@@ -772,9 +773,13 @@ export default function App() {
   const executeTutor = useCallback(async (payload, _retryLabel) => {
     setLoading(true); lastPayloadRef.current = payload;
     try {
+      const token = getAccessToken();
       const res = await fetch(`${API_BASE}/api/tutor`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(90000),
       });
