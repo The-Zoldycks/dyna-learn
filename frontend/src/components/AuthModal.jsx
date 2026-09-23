@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   X, Sparkles, Mail, Lock, User, Loader2, ArrowRight,
   Eye, EyeOff, Check, AlertTriangle, KeyRound, ChevronLeft,
@@ -75,6 +75,7 @@ export default function AuthModal({
   const modalRef = useFocusTrap(open);
 
   // Reset internal state whenever the modal opens/closes
+  // eslint-disable-next-line react/set-state-in-effect
   useEffect(() => {
     if (!open) {
       setMode(initialMode || "login");

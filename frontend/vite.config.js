@@ -13,27 +13,33 @@ export default defineConfig({
       // Precache static assets (CSS/JS handled automatically by Workbox)
       includeAssets: ['dyna-learn-doc-icon.png', 'dyna-learn-logo-blue.png', 'mahoraga-wheel.png'],
       manifest: {
+        id: '/',
         name: 'Dyna-learn — Interactive AI Tutor',
         short_name: 'Dyna-learn',
         description: 'Adaptive visual knowledge diagrams and interactive AI tutoring.',
         theme_color: '#7c3aed',
         background_color: '#fafafa',
         display: 'standalone',
+        display_override: ['window-controls-overlay', 'standalone'],
         scope: '/',
         start_url: '/',
-        // Icon is 151x151 — declare accurately so Chrome install banner works correctly.
-        // "any maskable" on the same file is fine for basic installs; upgrade to a
-        // purpose-built maskable icon if branding needs safe-zone padding later.
+        categories: ['education', 'productivity'],
         icons: [
           {
             src: '/dyna-learn-doc-icon.png',
-            sizes: '151x151',
+            sizes: '192x192',
             type: 'image/png',
             purpose: 'any'
           },
           {
             src: '/dyna-learn-doc-icon.png',
-            sizes: '151x151',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: '/dyna-learn-doc-icon.png',
+            sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable'
           }

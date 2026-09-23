@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isSupabaseConfigured } from "../utils/supabaseClient";
 import {
   getSRSQueue,
-  getDueReviews,
   logHighlightToSRS as logLocal,
   updateSRSItem as updateLocal,
 } from "../utils/storage";
@@ -54,6 +53,7 @@ export function useSRS({ user }) {
   }, [isConfigured, user]);
 
   // Initial load
+  // eslint-disable-next-line react/set-state-in-effect
   useEffect(() => {
     fetchQueue();
   }, [fetchQueue]);
@@ -194,6 +194,7 @@ export function useSRS({ user }) {
     [isConfigured, queue, fetchQueue]
   );
 
+  // eslint-disable-next-line react/purity
   const dueReviews = queue.filter((c) => c.nextReview <= Date.now());
 
   return {
