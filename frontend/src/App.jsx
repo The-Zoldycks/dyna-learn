@@ -280,10 +280,11 @@ export default function App() {
       try {
         const payload = window.location.hash.slice(3);
         const decoded = decodeShareHash(payload);
-        if (decoded?.nodes?.length) setNodes(decoded.nodes);
-        if (decoded?.edges) setEdges(decoded.edges);
+        const applied = (decoded?.nodes?.length ? (setNodes(decoded.nodes), true) : false)
+          || (decoded?.edges?.length ? (setEdges(decoded.edges), true) : false);
         window.history.replaceState(null, "", window.location.pathname + window.location.search);
-        toast.success("Shared canvas loaded!", { duration: 3000 });
+        if (applied) toast.success("Shared canvas loaded!", { duration: 3000 });
+        else toast.error("Shared link is empty or uses an unknown format.");
       } catch (err) {
         toast.error("Failed to load shared canvas", { description: "Link might be corrupted or invalid." });
         console.error("Share decode error:", err);
@@ -295,7 +296,13 @@ export default function App() {
 
   // ---- React Flow callbacks ----
   const onConnect = useCallback(
-    (params) => setEdges((eds) => addEdge({ ...params, type: "smoothstep", animated: false }, eds)),
+    (params) => setEdges((eds) => addEdge({
+      ...params,
+      type: "smoothstep",
+      animated: false,
+      pathOptions: { borderRadius: 12 },
+      style: { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5, 5" },
+    }, eds)),
     [setEdges]
   );
   const onNodeClick = useCallback((_, node) => setSelectedNodeId(node.id), []);
@@ -898,20 +905,29 @@ export default function App() {
     return svgToPngBlob(svg.text, svg.W, svg.H);
   }, []);
 
+  const downloadBlob = useCallback((blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.download = filename;
+    anchor.href = url;
+    anchor.click();
+    // Delayed revoke — immediate revoke aborts downloads in Firefox/Safari.
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }, []);
+
   const handleExportPNG = useCallback(async () => {
     const instance = reactFlowInstanceRef.current;
     if (!instance) return;
     try {
       toast.loading("Generating PNG…", { id: "export" });
       const built = buildDiagramSVG(instance.getNodes(), instance.getEdges());
-      if (!built) return;
+      if (!built) {
+        toast.dismiss("export");
+        toast.info("Add nodes to the canvas before exporting.");
+        return;
+      }
       const blob = await svgToPngBlob(built.text, built.W, built.H);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.download = `dyna-learn-${Date.now()}.png`;
-      anchor.href = url;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `dyna-learn-${Date.now()}.png`);
       track("diagram_exported", { format: "png" });
       toast.success("Diagram exported as PNG!", { id: "export", duration: 2500 });
     } catch (err) {
@@ -927,20 +943,20 @@ export default function App() {
     if (!instance) return;
     try {
       const built = buildDiagramSVG(instance.getNodes(), instance.getEdges());
-      if (!built) return;
+      if (!built) {
+        toast.info("Add nodes to the canvas before exporting.");
+        return;
+      }
       const blob = new Blob([built.text], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.download = `dyna-learn-${Date.now()}.svg`;
-      anchor.href = url;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `dyna-learn-${Date.now()}.svg`);
       track("diagram_exported", { format: "svg" });
       toast.success("Diagram exported as vector SVG!", { duration: 2500 });
     } catch (err) {
       console.error("SVG export failed:", err);
       toast.error("SVG export failed — try again.");
     }
+  // downloadBlob is stable (empty deps)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleExportAnki = useCallback(() => {
@@ -951,12 +967,7 @@ export default function App() {
         return;
       }
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.download = `dyna-learn-anki-${Date.now()}.csv`;
-      anchor.href = url;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `dyna-learn-anki-${Date.now()}.csv`);
       track("diagram_exported", { format: "anki_csv" });
       toast.success("Anki flashcards CSV exported!", {
         description: "Ready to import into Anki (Basic front/back cards).",
@@ -965,7 +976,7 @@ export default function App() {
       console.error("Anki export failed:", err);
       toast.error("Failed to generate Anki CSV.");
     }
-  }, [nodes, edges]);
+  }, [nodes, edges, downloadBlob]);
 
   // ---- Voice Input (tap-to-toggle with auto-append) ---------------------
   const toggleVoice = useCallback((e) => {
@@ -1063,7 +1074,14 @@ export default function App() {
         if (shareErr?.name === "AbortError") return;
       }
 
-      await navigator.clipboard.writeText(url);
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        // Clipboard blocked — show the URL so it can be copied manually
+        toast.info("Copy this share link manually:", { description: url, duration: 12000 });
+        track("lesson_shared", { method: "link_manual" });
+        return;
+      }
       track("lesson_shared", { method: "link" });
       toast.success("Share link copied to clipboard!", {
         description: user
@@ -1864,10 +1882,10 @@ export default function App() {
                   <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
                     isTTSLoading
                       ? "bg-violet-100 text-violet-700 border-violet-200"
-                      : isSpeaking
-                      ? "bg-violet-600 text-white border-violet-600"
                       : isPaused
                       ? "bg-amber-100 text-amber-700 border-amber-200"
+                      : isSpeaking
+                      ? "bg-violet-600 text-white border-violet-600"
                       : "bg-white border-slate-200"
                   }`}>
                     {isTTSLoading ? "Loading audio…" : isPaused ? "Paused" : isSpeaking ? "Playing" : "Ready"}

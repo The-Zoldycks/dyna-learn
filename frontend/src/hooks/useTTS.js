@@ -82,6 +82,13 @@ export function useTTS(apiBase) {
     window.speechSynthesis.speak(utterance);
   }, [browserVoices, selectedVoice, playbackSpeed, cleanupAudio]);
 
+  // Map UI speed (0.5-2x) to Edge SSML rate percent within backend [-50%, +100%]
+  const edgeRate = useCallback((speed) => {
+    const pct = Math.round((speed - 1) * 100);
+    const clamped = Math.max(-50, Math.min(100, pct));
+    return `${clamped >= 0 ? "+" : ""}${clamped}%`;
+  }, []);
+
   const speakEdge = useCallback(async (text) => {
     try {
       cleanupAudio();
@@ -91,7 +98,8 @@ export function useTTS(apiBase) {
       const res = await fetch(`${apiBase}/api/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.slice(0, 5000), voice: selectedVoice }),
+        body: JSON.stringify({ text: text.slice(0, 5000), voice: selectedVoice, rate: edgeRate(playbackSpeed) }),
+        signal: AbortSignal.timeout(20000),
       });
       if (!res.ok) throw new Error(`Edge TTS ${res.status}`);
 
@@ -117,11 +125,12 @@ export function useTTS(apiBase) {
     } catch (e) {
       cleanupAudio();
       setIsSpeaking(false); setIsPaused(false); setIsTTSLoading(false);
-      if (e?.name === "AbortError") return true;
+      // Fetch aborts/timeouts must fall back; only play() aborts stay silent.
+      if (e?.name === "AbortError" && e?.message?.includes("play")) return true;
       console.warn("Edge TTS failed, falling back:", e.message);
       return false;
     }
-  }, [apiBase, selectedVoice, playbackSpeed, cleanupAudio]);
+  }, [apiBase, selectedVoice, playbackSpeed, cleanupAudio, edgeRate]);
 
   const isEdgeVoice = useCallback(
     (voice) => voice.includes("Neural") || edgeVoices.some((v) => v.id === voice),

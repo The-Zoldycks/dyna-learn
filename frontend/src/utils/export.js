@@ -253,10 +253,17 @@ export function buildAnkiCSV(nodes = [], edges = []) {
   const escapeCsv = (str) => `"${String(str).replace(/"/g, '""')}"`;
   const rows = [["Front", "Back", "Tags"].map(escapeCsv).join(",")];
 
+  const escapeHtml = (str = "") =>
+    String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
   realNodes.forEach((n) => {
     const label = (n.data?.label || n.id).replace(/\n/g, " ");
     const related = connections.get(n.id) || ["Core concept in this diagram"];
-    const backHtml = `<div><strong>${label}</strong><br/><ul>${related.map((r) => `<li>${r}</li>`).join("")}</ul></div>`;
+    const backHtml = `<div><strong>${escapeHtml(label)}</strong><br/><ul>${related.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul></div>`;
     const tag = n.data?.highlight ? "dyna-learn #needs-review" : "dyna-learn";
 
     rows.push([escapeCsv(label), escapeCsv(backHtml), escapeCsv(tag)].join(","));

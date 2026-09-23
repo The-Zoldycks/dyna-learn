@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { processImage as processImageFile, revokePreviewUrl, validateImageFile } from "../utils/image.js";
 
@@ -8,6 +8,12 @@ export function useImageAttachment({ loading = false } = {}) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const fileInputRef = useRef(null);
+  const previewRef = useRef(null);
+  useEffect(() => { previewRef.current = selectedImage?.previewUrl || null; }, [selectedImage]);
+  // Revoke any lingering blob URL on unmount
+  useEffect(() => () => {
+    if (previewRef.current) revokePreviewUrl(previewRef.current);
+  }, []);
 
   const processFile = useCallback(async (file) => {
     if (!file) return;
