@@ -43,6 +43,11 @@ create table if not exists public.srs_cards (
   updated_at timestamptz default now()
 );
 
+-- Migration for existing databases: add is_public if the table predates it.
+-- MUST run before the partial index below.
+alter table public.study_sessions
+  add column if not exists is_public boolean not null default false;
+
 -- Indexes for lightning fast queries
 create index if not exists idx_sessions_user on public.study_sessions(user_id, updated_at desc);
 create index if not exists idx_sessions_public on public.study_sessions(id) where is_public = true;
@@ -143,12 +148,7 @@ create trigger trg_touch_srs
   for each row execute function public.touch_updated_at();
 
 -- ==============================================================================
--- Migration: add is_public column if upgrading an existing database
--- Run this ONCE in the Supabase SQL editor if the table already exists:
+-- NOTE: the is_public migration now runs inline above (before the indexes),
+-- so pasting this whole file into the SQL editor works on both fresh and
+-- existing databases. Everything here is idempotent — safe to re-run.
 -- ==============================================================================
--- alter table public.study_sessions add column if not exists is_public boolean not null default false;
--- create index if not exists idx_sessions_public on public.study_sessions(id) where is_public = true;
--- drop policy if exists "Anyone can read public sessions" on public.study_sessions;
--- create policy "Anyone can read public sessions"
---   on public.study_sessions for select
---   using (is_public = true);
