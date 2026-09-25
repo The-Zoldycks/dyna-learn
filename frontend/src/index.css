@@ -29,6 +29,27 @@ body {
   }
 }
 
+/* Theme-colored thin scrollbar for custom dropdowns (voice list, etc.) */
+.themed-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #7c3aed #f5f3ff;
+}
+.themed-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.themed-scroll::-webkit-scrollbar-track {
+  background: #f5f3ff;
+  border-radius: 8px;
+}
+.themed-scroll::-webkit-scrollbar-thumb {
+  background: #7c3aed;
+  border-radius: 8px;
+  border: 2px solid #f5f3ff;
+}
+.themed-scroll::-webkit-scrollbar-thumb:hover {
+  background: #6d28d9;
+}
+
 /* Prevent iOS auto-zoom on focus: inputs must be >=16px on small screens */
 @media (max-width: 640px) {
   input, textarea, select {

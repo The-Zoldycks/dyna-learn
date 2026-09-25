@@ -23,6 +23,7 @@ import ChatSkeleton from "./components/ChatSkeleton.jsx";
 import SimpleMarkdown from "./components/SimpleMarkdown.jsx";
 import QuizCard from "./components/QuizCard.jsx";
 import UserMenu from "./components/UserMenu.jsx";
+import VoiceSelect from "./components/VoiceSelect.jsx";
 const JournalModal = lazy(() => import("./components/JournalModal.jsx"));
 const TopicExplorerModal = lazy(() => import("./components/TopicExplorerModal.jsx"));
 const FlashcardPracticeModal = lazy(() => import("./components/FlashcardPracticeModal.jsx"));
@@ -1613,7 +1614,7 @@ export default function App() {
             )}
 
             {/* Voice selector — collapsible, collapsed by default */}
-            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 overflow-visible">
               <button
                 type="button"
                 onClick={() => setVoiceOpen((v) => !v)}
@@ -1629,24 +1630,12 @@ export default function App() {
               </button>
               {voiceOpen && (
               <div id="voice-panel" className="px-3 pb-3">
-              <label htmlFor="voice-select" className="sr-only">Choose a narration voice</label>
-              <select
-                id="voice-select"
-                value={selectedVoice}
-                onChange={(e) => setSelectedVoice(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500"
-              >
-                <optgroup label="Neural — Edge (online)">
-                  {edgeVoices.length
-                    ? edgeVoices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)
-                    : <option value="en-US-AriaNeural">Aria — Warm female (US) — loading…</option>}
-                </optgroup>
-                <optgroup label="Offline / Standard">
-                  {browserVoices.length
-                    ? browserVoices.map((v) => <option key={v.name + v.voiceURI} value={v.name}>{v.name} — {v.lang}</option>)
-                    : <option value="">Default system voice</option>}
-                </optgroup>
-              </select>
+              <VoiceSelect
+                edgeVoices={edgeVoices}
+                browserVoices={browserVoices}
+                selectedVoice={selectedVoice}
+                setSelectedVoice={setSelectedVoice}
+              />
               <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-200/60">
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
