@@ -1668,24 +1668,37 @@ export default function App() {
                 <div className="w-12 h-12 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center mb-4 shadow-sm border border-violet-200/50">
                   <Brain size={24} />
                 </div>
-                <h3 className="text-slate-800 font-semibold mb-2">Welcome to Dyna-learn</h3>
-                <p className="text-xs text-slate-500 mb-8 max-w-[200px] leading-relaxed">
-                  Start typing below, or try one of these topics to see the canvas in action.
+                <h3 className="text-slate-800 font-semibold mb-2">What do you want to learn?</h3>
+                <p className="text-xs text-slate-500 mb-6 max-w-[220px] leading-relaxed">
+                  Pick a starter below, or type your own question.
                 </p>
-                <div className="flex flex-col gap-2 w-full">
+                <div className="flex flex-wrap justify-center gap-2 max-w-[320px]">
                   <button
                     onClick={() => setTopicExplorerOpen(true)}
-                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-[13px] font-semibold transition shadow-sm"
+                    className="rise-in inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 transition shadow-sm min-h-[44px]"
+                    style={{ animationDelay: "0ms" }}
                   >
-                    <Compass size={16} /> Explore Topic Starters
+                    <Compass size={13} /> Topic Starters
                   </button>
-                  <button onClick={() => { setQuestion("Explain Database Normalization (1NF to BCNF)."); }} className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                  <button
+                    onClick={() => { setQuestion("Explain Database Normalization (1NF to BCNF)."); }}
+                    className="rise-in px-3.5 py-2 rounded-full bg-white border border-slate-200 text-xs font-medium text-slate-700 hover:border-violet-300 hover:text-violet-700 transition min-h-[44px]"
+                    style={{ animationDelay: "60ms" }}
+                  >
                     Database Normalization
                   </button>
-                  <button onClick={() => { setQuestion("How does OAuth 2.0 work?"); }} className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                  <button
+                    onClick={() => { setQuestion("How does OAuth 2.0 work?"); }}
+                    className="rise-in px-3.5 py-2 rounded-full bg-white border border-slate-200 text-xs font-medium text-slate-700 hover:border-violet-300 hover:text-violet-700 transition min-h-[44px]"
+                    style={{ animationDelay: "120ms" }}
+                  >
                     OAuth 2.0 Auth Code Flow
                   </button>
-                  <button onClick={() => { setQuestion("Draw a flowchart for the React Component Lifecycle."); }} className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[13px] text-slate-700 hover:border-violet-300 hover:shadow-sm hover:text-violet-700 transition">
+                  <button
+                    onClick={() => { setQuestion("Draw a flowchart for the React Component Lifecycle."); }}
+                    className="rise-in px-3.5 py-2 rounded-full bg-white border border-slate-200 text-xs font-medium text-slate-700 hover:border-violet-300 hover:text-violet-700 transition min-h-[44px]"
+                    style={{ animationDelay: "180ms" }}
+                  >
                     React Component Lifecycle
                   </button>
                 </div>
@@ -1781,13 +1794,13 @@ export default function App() {
 
           {/* Fixed bottom area: Form & Mini-player */}
           <div className="p-4 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
-            {/* Question form */}
+            {/* Question form — unified composer card */}
             <form
               onSubmit={handleSubmit}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className="relative flex flex-col gap-3"
+              className="relative rounded-2xl border border-slate-200 bg-white shadow-sm focus-within:ring-2 focus-within:ring-violet-500 focus-within:border-violet-500 transition overflow-visible"
             >
               {/* Drag-and-drop overlay */}
               {isDraggingImage && (
@@ -1833,9 +1846,10 @@ export default function App() {
                 aria-disabled={loading || isOffline}
                 aria-label="Ask the tutor a question"
                 aria-describedby={loading ? "submit-hint-loading" : isOffline ? "submit-hint-offline" : undefined}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 focus:bg-white transition resize-none disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-slate-100"
+                className="w-full bg-transparent px-4 pt-3 text-sm placeholder:text-slate-400 focus:outline-none resize-none disabled:opacity-60 disabled:cursor-not-allowed"
               />
-              <div className="flex gap-2">
+              {/* Composer footer toolbar */}
+              <div className="flex items-center gap-1.5 px-3 pb-3">
                 <input
                   type="file"
                   accept="image/*"
@@ -1850,7 +1864,7 @@ export default function App() {
                   disabled={loading}
                   aria-label="Upload image"
                   title="Upload image (max 5MB)"
-                  className="flex-none flex items-center justify-center w-12 rounded-xl border bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-none flex items-center justify-center w-10 h-10 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Image size={18} aria-hidden="true" />
                 </button>
@@ -1861,24 +1875,37 @@ export default function App() {
                     disabled={loading}
                     aria-label={isListening ? "Listening… click to stop" : "Click to dictate"}
                     title={isListening ? "Click to stop dictation" : "Click to dictate"}
-                    className={`flex-none flex items-center justify-center w-12 rounded-xl border transition ${
+                    className={`flex-none flex items-center justify-center w-10 h-10 rounded-xl transition ${
                       isListening
-                        ? "bg-red-500 border-red-600 text-white animate-pulse"
-                        : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
+                        ? "bg-red-500 text-white animate-pulse"
+                        : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                     } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     <Mic size={18} />
                   </button>
                 )}
+                {selectedNodeId && (
+                  <span className="hidden sm:inline-flex items-center gap-1.5 ml-1 px-2.5 py-1.5 rounded-full bg-violet-50 border border-violet-200 text-[11px] font-semibold text-violet-700 max-w-[180px]">
+                    <span className="truncate">{selectedNodeLabel}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedNodeId(null)}
+                      aria-label="Clear selected node"
+                      className="shrink-0 text-violet-400 hover:text-violet-700"
+                    >
+                      <XCircle size={12} />
+                    </button>
+                  </span>
+                )}
                 <button
                   type="submit"
                   disabled={loading || isOffline || (!question.trim() && !selectedImage)}
                   aria-label={loading ? "Adapting diagram" : "Send your question to the tutor"}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md"
+                  className="ml-auto flex-none flex items-center justify-center w-10 h-10 rounded-full bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
                 >
                   {loading
-                    ? <><Loader2 size={16} className="animate-spin" aria-hidden="true" /> Thinking…</>
-                    : <><Send size={16} aria-hidden="true" /> Ask Tutor</>}
+                    ? <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                    : <Send size={16} aria-hidden="true" />}
                 </button>
               </div>
               {loading && (

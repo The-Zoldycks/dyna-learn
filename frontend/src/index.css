@@ -15,12 +15,22 @@ body {
   overflow: hidden;
 }
 
+/* Staggered entrance for suggestion chips (empty state) */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
 /* Respect users who prefer reduced motion — scope to animated elements, not * */
 @media (prefers-reduced-motion: reduce) {
   .animate-pulse,
   .animate-spin,
   .animate-bounce,
   .mahoraga-wheel,
+  .rise-in,
   [style*="animation"],
   [style*="transition"] {
     animation-duration: 0.01ms !important;
