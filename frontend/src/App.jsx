@@ -1312,7 +1312,7 @@ export default function App() {
           className="bg-app"
         >
           <Background color={canvasInk} gap={24} size={1.5} />
-          <Controls className="mb-[60px] sm:mb-0" />
+          <Controls position="top-left" className="!m-3 sm:!ml-[424px]" />
 
           {/* Collapsible Canvas Radar Minimap — bottom-right, parked clearly above action bar */}
           {showMinimap && (

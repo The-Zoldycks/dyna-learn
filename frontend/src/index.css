@@ -209,10 +209,10 @@ body {
 /* ── React Flow theming (library reads these vars) ────────────────────── */
 .react-flow {
   --xy-background-color: var(--app);
-  --xy-controls-button-background-color: var(--neu-bg);
+  --xy-controls-button-background-color: var(--surface);
   --xy-controls-button-background-color-hover: var(--surface-hover);
-  --xy-controls-button-border-color: var(--line-strong);
-  --xy-controls-button-color: var(--fg-muted);
+  --xy-controls-button-border-color: var(--line);
+  --xy-controls-button-color: var(--fg);
   --xy-controls-button-color-hover: var(--fg);
   --xy-controls-box-shadow: var(--neu-convex-lg);
   --xy-minimap-background-color: var(--neu-bg);
@@ -225,22 +225,36 @@ body {
   --xy-attribution-background-color: transparent;
   --xy-attribution-text-color: var(--fg-subtle);
 }
-/* React Flow's own chrome keeps a hairline in both themes — soft-UI drops
-   borders entirely, which left the zoom cluster invisible on a pale canvas. */
 .react-flow__controls {
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  background: var(--neu-bg);
+  background: var(--surface);
+  box-shadow: var(--neu-convex-lg);
 }
-.react-flow__controls-button {
-  background: var(--neu-bg);
+/* The zoom cluster is small, sits on a busy canvas and was previously
+   tucked behind the chat panel at bottom-left. It needs a clearly
+   separated surface plus full-strength icons, not a soft-UI surface that
+   dissolves into the background. Double-class selectors because the
+   library's own stylesheet lands after ours and sets the button box
+   size. */
+.react-flow__controls .react-flow__controls-button {
+  width: 38px;
+  height: 38px;
 }
 .react-flow__controls-button:hover {
-  background: var(--surface-hover);
+  background: var(--xy-controls-button-background-color-hover);
+  color: var(--xy-controls-button-color-hover);
 }
 .react-flow__controls-button svg {
   fill: currentColor;
+}
+/* 44px on touch, where the 38px cluster is below the minimum target. */
+@media (pointer: coarse) {
+  .react-flow__controls .react-flow__controls-button {
+    width: 44px;
+    height: 44px;
+  }
 }
 .react-flow__minimap {
   border-radius: 16px;
