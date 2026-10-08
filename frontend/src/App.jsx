@@ -14,7 +14,7 @@ import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
   MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search, Droplets, FolderKanban,
-  Target, Lightbulb, Sprout, AlertTriangle, Trophy, Dumbbell, MoreHorizontal,
+  Target, Lightbulb, Sprout, AlertTriangle, Trophy, Dumbbell, MoreHorizontal, Moon, Sun,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -204,6 +204,10 @@ export default function App() {
   );
   const [playerOpen, setPlayerOpen] = useState(
     () => { try { return localStorage.getItem("dyna-player-open") === "1"; } catch { return false; } }
+  );
+  // Dark mode — persisted, applied via documentElement dataset.theme
+  const [dark, setDark] = useState(
+    () => { try { return localStorage.getItem("dyna-theme") === "dark"; } catch { return false; } }
   );
 
   const {
@@ -475,6 +479,13 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem("dyna-fluid", fluidOn ? "1" : "0"); } catch {} }, [fluidOn]);
   useEffect(() => { try { localStorage.setItem("dyna-voice-open", voiceOpen ? "1" : "0"); } catch {} }, [voiceOpen]);
   useEffect(() => { try { localStorage.setItem("dyna-player-open", playerOpen ? "1" : "0"); } catch {} }, [playerOpen]);
+  // Dark mode — persist + apply to documentElement (CSS reads [data-theme="dark"])
+  useEffect(() => {
+    try {
+      localStorage.setItem("dyna-theme", dark ? "dark" : "light");
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    } catch {}
+  }, [dark]);
 
   // ---- Helpers ----
   const toggleExpand = (idx) => {
@@ -1396,7 +1407,7 @@ export default function App() {
       </div>
 
       {/* ── Floating Top Actions (Top Right) ── */}
-      <header className="absolute top-4 right-4 sm:top-5 sm:right-5 z-20 flex items-center gap-2 bg-white/80 backdrop-blur-xl px-2 py-2 rounded-2xl shadow-sm border border-slate-200/60 max-w-[calc(100vw-2rem)]">
+      <header className="absolute top-4 right-4 sm:top-5 sm:right-5 z-20 flex items-center gap-2 neu-surface px-2 py-2 rounded-2xl max-w-[calc(100vw-2rem)]">
         <div className="hidden sm:flex items-center gap-2">
         <button
           onClick={() => setSessionDrawerOpen(true)}
@@ -1428,6 +1439,15 @@ export default function App() {
         >
           {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           <span className="hidden sm:inline">{isSaving ? "Saving…" : "Save"}</span>
+        </button>
+        <button
+          onClick={() => setDark((v) => !v)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 transition min-h-[44px] min-w-[44px] justify-center"
+          title={dark ? "Switch to light mode" : "Switch to dark mode"}
+          aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+          aria-pressed={dark}
+        >
+          {dark ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-slate-500" />}
         </button>
         <div className="hidden sm:flex items-center gap-2">
         <button
@@ -1494,7 +1514,7 @@ export default function App() {
       </header>
 
       {/* ── Left panel: Chat Sidebar (Floating on Desktop, Full on Mobile) ── */}
-      <div id="chat-panel" className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col bg-white/95 backdrop-blur-2xl sm:rounded-[2rem] shadow-2xl border-r sm:border border-slate-200/60 overflow-hidden transition-transform duration-300 ease-out pb-[calc(60px+env(safe-area-inset-bottom))] sm:pb-0 ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
+      <div id="chat-panel" className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col neu-surface sm:rounded-[2rem] overflow-hidden transition-transform duration-300 ease-out pb-[calc(60px+env(safe-area-inset-bottom))] sm:pb-0 ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
 
           {/* Panel header */}
           <div className="p-4 border-b border-slate-100 shrink-0">
@@ -1529,7 +1549,7 @@ export default function App() {
                   value={chatSearchQuery}
                   onChange={(e) => setChatSearchQuery(e.target.value)}
                   placeholder="Search discussion..."
-                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white"
+                  className="w-full pl-8 pr-7 py-1.5 text-xs neu-inset rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
                   autoFocus
                 />
                 {chatSearchQuery && (
@@ -1614,7 +1634,7 @@ export default function App() {
             )}
 
             {/* Voice selector — collapsible, collapsed by default */}
-            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 overflow-visible">
+            <div className="mt-3 rounded-xl neu-raised overflow-visible">
               <button
                 type="button"
                 onClick={() => setVoiceOpen((v) => !v)}
@@ -1682,21 +1702,21 @@ export default function App() {
                   </button>
                   <button
                     onClick={() => { setQuestion("Explain Database Normalization (1NF to BCNF)."); }}
-                    className="rise-in px-3.5 py-2 rounded-full bg-white border border-slate-200 text-xs font-medium text-slate-700 hover:border-violet-300 hover:text-violet-700 transition min-h-[44px]"
+                    className="rise-in px-3.5 py-2 rounded-full neu-raised text-xs font-medium text-slate-700 hover:text-violet-700 transition min-h-[44px]"
                     style={{ animationDelay: "60ms" }}
                   >
                     Database Normalization
                   </button>
                   <button
                     onClick={() => { setQuestion("How does OAuth 2.0 work?"); }}
-                    className="rise-in px-3.5 py-2 rounded-full bg-white border border-slate-200 text-xs font-medium text-slate-700 hover:border-violet-300 hover:text-violet-700 transition min-h-[44px]"
+                    className="rise-in px-3.5 py-2 rounded-full neu-raised text-xs font-medium text-slate-700 hover:text-violet-700 transition min-h-[44px]"
                     style={{ animationDelay: "120ms" }}
                   >
                     OAuth 2.0 Auth Code Flow
                   </button>
                   <button
                     onClick={() => { setQuestion("Draw a flowchart for the React Component Lifecycle."); }}
-                    className="rise-in px-3.5 py-2 rounded-full bg-white border border-slate-200 text-xs font-medium text-slate-700 hover:border-violet-300 hover:text-violet-700 transition min-h-[44px]"
+                    className="rise-in px-3.5 py-2 rounded-full neu-raised text-xs font-medium text-slate-700 hover:text-violet-700 transition min-h-[44px]"
                     style={{ animationDelay: "180ms" }}
                   >
                     React Component Lifecycle
@@ -1793,14 +1813,14 @@ export default function App() {
           </div>
 
           {/* Fixed bottom area: Form & Mini-player */}
-          <div className="p-4 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
+          <div className="p-4 shrink-0 flex flex-col gap-3">
             {/* Question form — unified composer card */}
             <form
               onSubmit={handleSubmit}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className="relative rounded-2xl border border-slate-200 bg-white shadow-sm focus-within:ring-2 focus-within:ring-violet-500 focus-within:border-violet-500 transition overflow-visible"
+              className="relative rounded-2xl neu-raised focus-within:ring-2 focus-within:ring-violet-500 transition overflow-visible"
             >
               {/* Drag-and-drop overlay */}
               {isDraggingImage && (
@@ -1925,7 +1945,7 @@ export default function App() {
 
             {/* Last-speech mini-player — collapsible, collapsed by default */}
             {lastSpeech && (
-              <div className="rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden">
+              <div className="rounded-xl neu-raised overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setPlayerOpen((v) => !v)}

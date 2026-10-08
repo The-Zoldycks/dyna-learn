@@ -15,6 +15,84 @@ body {
   overflow: hidden;
 }
 
+/* ── Neumorphism trial layer ─────────────────────────────────────────── */
+.neu-surface {
+  background: #eef0f4 !important;
+  border: none !important;
+  box-shadow: 8px 8px 16px #d6d9df, -8px -8px 16px #ffffff !important;
+}
+.neu-raised {
+  background: #f3f4f7 !important;
+  border: none !important;
+  box-shadow: 5px 5px 10px #d6d9df, -5px -5px 10px #ffffff !important;
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+.neu-raised:active {
+  box-shadow: inset 4px 4px 8px #d6d9df, inset -4px -4px 8px #ffffff !important;
+  transform: scale(0.98);
+}
+.neu-inset {
+  background: #eef0f4 !important;
+  border: none !important;
+  box-shadow: inset 6px 6px 12px #d6d9df, inset -6px -6px 12px #ffffff !important;
+}
+.neu-pressed {
+  background: #eef0f4 !important;
+  border: none !important;
+  box-shadow: inset 4px 4px 8px #d6d9df, inset -4px -4px 8px #ffffff !important;
+}
+
+/* ── Dark mode overrides ─────────────────────────────────────────────── */
+[data-theme="dark"] body {
+  background: #0f172a;
+  color-scheme: dark;
+}
+[data-theme="dark"] .neu-surface {
+  background: #1e293b !important;
+  box-shadow: 8px 8px 16px #0f172a, -8px -8px 16px #334155 !important;
+}
+[data-theme="dark"] .neu-raised {
+  background: #334155 !important;
+  box-shadow: 5px 5px 10px #0f172a, -5px -5px 10px #475569 !important;
+}
+[data-theme="dark"] .neu-raised:active {
+  box-shadow: inset 4px 4px 8px #0f172a, inset -4px -4px 8px #475569 !important;
+}
+[data-theme="dark"] .neu-inset {
+  background: #1e293b !important;
+  box-shadow: inset 6px 6px 12px #0f172a, inset -6px -6px 12px #334155 !important;
+}
+[data-theme="dark"] .neu-pressed {
+  background: #1e293b !important;
+  box-shadow: inset 4px 4px 8px #0f172a, inset -4px -4px 8px #334155 !important;
+}
+[data-theme="dark"] .themed-scroll::-webkit-scrollbar-track { background: #1e293b; }
+[data-theme="dark"] .themed-scroll::-webkit-scrollbar-thumb { background: #7c3aed; border-color: #1e293b; }
+
+/* Dark surfaces/text/borders — trial layer over hardcoded light utilities */
+[data-theme="dark"] .bg-white { background-color: #1e293b !important; }
+[data-theme="dark"] .bg-slate-50 { background-color: #182238 !important; }
+[data-theme="dark"] .bg-slate-100 { background-color: #243150 !important; }
+[data-theme="dark"] .text-slate-800,
+[data-theme="dark"] .text-slate-700 { color: #e2e8f0 !important; }
+[data-theme="dark"] .text-slate-500,
+[data-theme="dark"] .text-slate-400 { color: #94a3b8 !important; }
+[data-theme="dark"] .border-slate-200,
+[data-theme="dark"] .border-slate-100 { border-color: #334155 !important; }
+[data-theme="dark"] .hover\:bg-slate-50:hover { background-color: #243150 !important; }
+[data-theme="dark"] .hover\:bg-slate-100:hover { background-color: #2b3a55 !important; }
+[data-theme="dark"] textarea::placeholder,
+[data-theme="dark"] input::placeholder { color: #64748b; }
+
+/* GlideSelect dark vars */
+[data-theme="dark"] .glide-select {
+  --gs-surface: #1e293b;
+  --gs-highlight: #4c1d95;
+  --gs-text: #e2e8f0;
+  --gs-accent: #a78bfa;
+}
+[data-theme="dark"] .glide-select__menu { border-color: #334155; }
+
 /* Staggered entrance for suggestion chips (empty state) */
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(8px); }
