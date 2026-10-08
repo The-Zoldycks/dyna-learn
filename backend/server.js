@@ -581,14 +581,25 @@ Rules:
 const EDGE_TOKEN = process.env.EDGE_TOKEN || "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const EDGE_VOICE_LIST_URL = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=${EDGE_TOKEN}`;
 
-// Fallback voices when Bing is unreachable — prevents ReferenceError on voices endpoint
-const EDGE_VOICE_FALLBACK = [
-  { id: "en-US-AriaNeural", label: "Aria — Female (en-US)", lang: "en-US", gender: "Female", locale: "en-US" },
-  { id: "en-US-GuyNeural", label: "Guy — Male (en-US)", lang: "en-US", gender: "Male", locale: "en-US" },
-  { id: "en-GB-SoniaNeural", label: "Sonia — Female (en-GB)", lang: "en-GB", gender: "Female", locale: "en-GB" },
-  { id: "en-GB-RyanNeural", label: "Ryan — Male (en-GB)", lang: "en-GB", gender: "Male", locale: "en-GB" },
-  { id: "en-US-JennyNeural", label: "Jenny — Female (en-US)", lang: "en-US", gender: "Female", locale: "en-US" },
+// Curated English voices — a small set of long-lived Edge neural voices.
+// The previous filter (en/zh/ja/ko, first 30) surfaced ~30 mostly duplicated
+// voices including CJK ones the English tutor never uses. Order here is the
+// order the user sees, so the list is stable across Bing's own reshuffles.
+const CURATED_EDGE_VOICES = [
+  { id: "en-US-AriaNeural", label: "Aria — Warm, conversational (US)", gender: "Female", lang: "en-US" },
+  { id: "en-US-GuyNeural", label: "Guy — Neutral, clear (US)", gender: "Male", lang: "en-US" },
+  { id: "en-US-JennyNeural", label: "Jenny — Bright, upbeat (US)", gender: "Female", lang: "en-US" },
+  { id: "en-US-AvaNeural", label: "Ava — Precise, instructional (US)", gender: "Female", lang: "en-US" },
+  { id: "en-US-AndrewNeural", label: "Andrew — Calm, explanatory (US)", gender: "Male", lang: "en-US" },
+  { id: "en-GB-SoniaNeural", label: "Sonia — Soft, measured (UK)", gender: "Female", lang: "en-GB" },
+  { id: "en-GB-RyanNeural", label: "Ryan — Documentary narration (UK)", gender: "Male", lang: "en-GB" },
 ];
+const CURATED_EDGE_IDS = new Set(CURATED_EDGE_VOICES.map((v) => v.id));
+
+// Fallback voices when Bing is unreachable — derived from the curated list so
+// the two can never drift. Prevents a ReferenceError-shaped blank on the
+// voices endpoint during an outage.
+const EDGE_VOICE_FALLBACK = CURATED_EDGE_VOICES.map((v) => ({ ...v, locale: v.lang }));
 
 // In-memory voices cache (1h TTL) — avoids hitting Bing on every page load.
 // Failures are negatively cached for 5min so a Bing outage doesn't thundering-herd.
@@ -608,15 +619,17 @@ app.get("/api/tts/voices", async (req, res) => {
     const resp = await fetch(EDGE_VOICE_LIST_URL, { signal: AbortSignal.timeout(8000) });
     if (!resp.ok) throw new Error(`voices ${resp.status}`);
     const voices = await resp.json();
-    const filtered = voices
-      .filter((v) => v.Locale.startsWith("en-") || v.Locale.startsWith("zh-") || v.Locale.startsWith("ja-") || v.Locale.startsWith("ko-"))
-      .slice(0, 30)
-      .map((v) => ({ id: v.ShortName, label: `${String(v.FriendlyName).replace("Microsoft ", "")} — ${v.Gender} (${v.Locale})`, lang: v.Locale, gender: v.Gender, locale: v.Locale }));
+    // Keep only curated ids that Bing still serves, in curated order. If a
+    // curated voice has been retired we drop it rather than offering a voice
+    // that will fail at synthesis time; if none survive, fall back below.
+    const filtered = CURATED_EDGE_VOICES.filter((c) =>
+      voices.some((v) => v.ShortName === c.id)
+    ).map((c) => ({ ...c, locale: c.lang }));
     if (filtered.length) {
       voicesCache = { at: Date.now(), voices: filtered };
       return res.json({ voices: filtered, mode: "edge", count: filtered.length });
     }
-    throw new Error("empty");
+    throw new Error("no curated voices available");
   } catch (e) {
     console.warn("[tts] getVoices failed, using fallback:", e.message);
     voicesFailureAt = Date.now();
