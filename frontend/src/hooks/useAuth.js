@@ -119,6 +119,9 @@ export function useAuth() {
     if (!isConfigured) return;
     const prevUserId = user?.id;
     await supabase.auth.signOut();
+    // Drop any in-flight recovery state so signing out can't leave a session
+    // that updateUser would still accept as a recovery session.
+    try { sessionStorage.removeItem("dyna_password_recovery_pending"); } catch {}
     setUser(null);
     setProfile(null);
     try {
@@ -161,7 +164,13 @@ export function useAuth() {
     }
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) {
-      toast.error("Password update failed", { description: error.message });
+      if (/expired/i.test(error.message)) {
+        // The recovery gate rejected us: there is no valid recovery session,
+        // so this must be a reused link rather than a mistaken password.
+        toast.error("Reset link expired", { description: "Request a new reset email and try again." });
+      } else {
+        toast.error("Password update failed", { description: error.message });
+      }
       throw error;
     }
     toast.success("Password updated!", { description: "You can now sign in with your new password." });

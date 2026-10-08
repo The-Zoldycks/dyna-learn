@@ -133,6 +133,56 @@ async function refreshAccessToken(refreshToken) {
   return refreshInFlight;
 }
 
+// ── Password recovery gate ──────────────────────────────────────────────────
+// The reset form must not be openable until the emailed code has actually been
+// exchanged for a session belonging to the account the email was sent to.
+// Without this gate the form ran against whatever session was in localStorage,
+// silently changing an already-signed-in account's password on a shared device.
+const RECOVERY_PENDING_KEY = "dyna_password_recovery_pending";
+
+function setRecoveryPending(on) {
+  try {
+    if (on) sessionStorage.setItem(RECOVERY_PENDING_KEY, "1");
+    else sessionStorage.removeItem(RECOVERY_PENDING_KEY);
+  } catch {}
+}
+
+export function isRecoveryPending() {
+  try { return sessionStorage.getItem(RECOVERY_PENDING_KEY) === "1"; } catch { return false; }
+}
+
+// Resolves once the page-load link handling has decided whether a usable
+// recovery session was established. The reset modal waits on this.
+let _resolveRecovery;
+export const recoveryLinkResult = new Promise((resolve) => { _resolveRecovery = resolve; });
+
+function finishRecovery(wasRecoveryLink, ok) {
+  if (!wasRecoveryLink) {
+    // Not a recovery flow (plain load, or an OAuth callback): make sure no
+    // stale recovery grant from an earlier navigation survives.
+    setRecoveryPending(false);
+    _resolveRecovery({ wasRecoveryLink: false, ok: false });
+    return;
+  }
+  if (ok) setRecoveryPending(true);
+  else setRecoveryPending(false);
+  _resolveRecovery({ wasRecoveryLink: true, ok });
+}
+
+function isRecoveryUrl() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("reset") === "1") return true;
+  if (params.get("type") === "recovery") return true;
+  if (window.location.hash.includes("type=recovery")) return true;
+  return false;
+}
+
+// Captured at import time, before any of the link handling below rewrites the
+// URL. React's StrictMode runs effects twice, and the first pass strips the
+// query — re-reading the URL in an effect would then see a clean page and skip.
+export const recoveryLinkDetected =
+  typeof window !== "undefined" && isRecoveryUrl();
+
 // Check for OAuth hash tokens (legacy implicit flow) on app load
 if (typeof window !== "undefined") {
   const hash = window.location.hash;
@@ -143,6 +193,7 @@ if (typeof window !== "undefined") {
       const refreshToken = hashParams.get("refresh_token");
       const expiresIn = parseInt(hashParams.get("expires_in") || "3600", 10);
       if (accessToken) {
+        const isRecovery = hash.includes("type=recovery") || hash.includes("recovery");
         const initialSession = {
           access_token: accessToken,
           refresh_token: refreshToken,
@@ -151,6 +202,8 @@ if (typeof window !== "undefined") {
         setStoredSession(initialSession);
         scheduleTokenRefresh(initialSession);
         window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        // A hash recovery token *is* the authenticated recovery session.
+        if (isRecovery) setRecoveryPending(true);
         setTimeout(() => {
           auth.getUser().then(({ data }) => {
             if (data?.user) {
@@ -168,21 +221,31 @@ if (typeof window !== "undefined") {
   // Check for PKCE code exchange (modern flow: ?code=...)
   const searchParams = new URLSearchParams(window.location.search);
   const code = searchParams.get("code");
-  if (code) {
-    const verifier = getPkceVerifier();
+  // Capture whether this is a recovery link *before* any exchange rewrites the URL.
+  const recoveryLinkFlag = isRecoveryUrl();
+  if (code) {    const verifier = getPkceVerifier();
     if (verifier) {
-      exchangePkceCode(code, verifier);
+      exchangePkceCode(code, verifier).then((ok) => finishRecovery(recoveryLinkFlag, ok));
     } else {
-      // Code without a verifier (recovery link, second tab, cleared storage):
-      // don't leave a dead ?code= in the URL.
+      // Code without a verifier (recovery link in another browser, cleared
+      // storage, second tab). The recovery code cannot be exchanged, so the
+      // session on disk stays whatever it was — the reset form must not run
+      // against it. Strip the dead ?code= and fail the recovery flow.
+      finishRecovery(recoveryLinkFlag, false);
       window.history.replaceState(null, "", window.location.pathname);
       console.warn("Auth code present without PKCE verifier — restart sign-in.");
     }
+  } else if (recoveryLinkFlag) {
+    // No code to exchange. A hash recovery token already established the
+    // session above; anything else is a stale or reused reset link.
+    finishRecovery(true, isRecoveryPending());
+  } else {
+    // Ordinary page load — settle so nothing waits on this.
+    finishRecovery(false, false);
   }
 }
 
-// Exchange an OAuth/recovery code for a session (verifier-less recovery links
-// still fail closed here; the reset modal handles password recovery separately).
+// Exchange an OAuth/recovery code for a session. Resolves true on success.
 async function exchangePkceCode(code, verifier) {
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
@@ -206,9 +269,11 @@ async function exchangePkceCode(code, verifier) {
     setPkceVerifier(null);
     window.history.replaceState(null, "", window.location.pathname);
     notifyAuthChange("SIGNED_IN", session);
+    return true;
   } catch (err) {
     console.error("PKCE code exchange failed:", err);
     setPkceVerifier(null);
+    return false;
   }
 }
 
@@ -241,6 +306,14 @@ function generateCodeVerifier() {
   const array = new Uint8Array(32);
   crypto.getRandomValues(array);
   return btoa(String.fromCharCode(...array))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=/g, "");
+}
+
+async function pkceChallengeFromVerifier(verifier) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=/g, "");
@@ -367,10 +440,7 @@ export const auth = {
     let challenge = verifier;
     let method = "plain";
     try {
-      const data = new TextEncoder().encode(verifier);
-      const hash = await crypto.subtle.digest("SHA-256", data);
-      const hashArray = new Uint8Array(hash);
-      challenge = btoa(String.fromCharCode(...hashArray)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+      challenge = await pkceChallengeFromVerifier(verifier);
       method = "S256";
     } catch {}
     const targetUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=${method}`;
@@ -389,6 +459,9 @@ export const auth = {
     if (refreshTimer) clearTimeout(refreshTimer);
     setStoredSession(null);
     setPkceVerifier(null);
+    // Signing out must also drop any recovery grant, or a stale flag would let
+    // updateUser act on the next session that gets created.
+    setRecoveryPending(false);
     notifyAuthChange("SIGNED_OUT", null);
     return { error: null };
   },
@@ -398,23 +471,53 @@ export const auth = {
       return { error: new Error("Supabase is not configured.") };
     }
     try {
+      // Bind the emailed link to a PKCE challenge. Without this the recovery
+      // code is exchangeable by nobody, the client silently drops it, and the
+      // reset form would run against whatever session is already in
+      // localStorage — changing the wrong account's password.
+      const verifier = generateCodeVerifier();
+      let challenge = verifier;
+      let method = "plain";
+      try {
+        challenge = await pkceChallengeFromVerifier(verifier);
+        method = "S256";
+      } catch {
+        // crypto.subtle is unavailable outside secure contexts. The "plain"
+        // fallback still binds the code to the verifier this browser holds, so
+        // a reset link opened elsewhere still fails to exchange.
+      }
       const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-        body: JSON.stringify({ email, gotrue_meta_security: {}, redirect_to: redirectTo }),
+        body: JSON.stringify({
+          email,
+          gotrue_meta_security: {},
+          redirect_to: redirectTo,
+          code_challenge: challenge,
+          code_challenge_method: method,
+        }),
       });
       if (!res.ok) {
+        setPkceVerifier(null);
         const json = await res.json().catch(() => ({}));
         return { error: new Error(json.error_description || json.msg || json.message || "Failed to send reset email") };
       }
+      setPkceVerifier(verifier);
       return { error: null };
     } catch (err) {
+      setPkceVerifier(null);
       return { error: err };
     }
   },
 
   async updateUser({ password }) {
     if (!isSupabaseConfigured()) return { error: new Error("Supabase is not configured.") };
+    // Refuse unless the current session is one we just recovered into. This is
+    // the guard that keeps a password change from landing on an unrelated,
+    // already-signed-in account.
+    if (!isRecoveryPending()) {
+      return { error: new Error("This link has expired. Request a new reset email and try again.") };
+    }
     const session = getStoredSession();
     if (!session?.access_token) return { error: new Error("No active session — please use the reset link again.") };
     try {
@@ -425,6 +528,7 @@ export const auth = {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) return { error: new Error(json.error_description || json.msg || json.message || "Failed to update password") };
+      setRecoveryPending(false);
       return { error: null, data: json };
     } catch (err) {
       return { error: err };

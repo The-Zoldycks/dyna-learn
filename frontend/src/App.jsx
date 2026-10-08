@@ -37,6 +37,7 @@ import { useImageAttachment } from "./hooks/useImageAttachment.js";
 import { useSessions } from "./hooks/useSessions.js";
 import { useSRS } from "./hooks/useSRS.js";
 import { getLayoutedElements } from "./utils/layout.js";
+import { recoveryLinkResult, recoveryLinkDetected } from "./utils/supabaseClient.js";
 import { useTheme, useToken } from "./theme.js";
 import { updateStreakOnLoad, saveSnapshot } from "./utils/storage.js";
 import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
@@ -197,6 +198,9 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState(null);
+  // Set when a reset link arrived but couldn't be exchanged, so the auth modal
+  // can explain itself instead of showing a form that cannot succeed.
+  const [recoveryExpired, setRecoveryExpired] = useState(false);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   // Collapsible audio panels — collapsed by default so the tutor response area stays clean
@@ -244,18 +248,38 @@ export default function App() {
   // Streak increments only on learning (first successful tutor response per day), not on page load
 
   // Detect password recovery link (?reset=1 or hash type=recovery) and open reset modal.
-  // The query/hash is stripped so a reload can't reopen the modal.
+  // The query is stripped so a reload can't reopen the modal.
+  // Waits for the recovery code to actually be exchanged: if it can't be, the
+  // link is stale and we fall back to the request form instead of opening a
+  // reset form that would rewrite whatever session is already signed in.
+  // Uses recoveryLinkDetected (captured at module import) rather than the live
+  // URL, because this effect runs twice in StrictMode and the first pass has
+  // already stripped the query.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const hash = window.location.hash;
-    const hasReset = params.get("reset") === "1" || hash.includes("type=recovery") || window.location.search.includes("type=recovery") || (hash.includes("access_token") && hash.includes("recovery"));
-    if (hasReset) {
+    let cancelled = false;
+    if (!recoveryLinkDetected) return;
+    (async () => {
+      const params = new URLSearchParams(window.location.search);
       params.delete("reset");
+      params.delete("type");
       const qs = params.toString();
       window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
-      setAuthModalMode("reset");
-      setAuthModalOpen(true);
-    }
+
+      const result = await recoveryLinkResult;
+      if (cancelled) return;
+
+      if (result.ok) {
+        setAuthModalMode("reset");
+        setAuthModalOpen(true);
+      } else {
+        // Link was already used, expired, or opened in a browser that never
+        // requested it. Offer to send a fresh one rather than a dead form.
+        setRecoveryExpired(true);
+        setAuthModalMode("forgot");
+        setAuthModalOpen(true);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // ---- Share URL parsing on mount ----
@@ -2064,7 +2088,8 @@ export default function App() {
           <AuthModal
             open={authModalOpen}
             initialMode={authModalMode}
-            onClose={() => { setAuthModalOpen(false); setAuthModalMode(null); }}
+            expiredRecovery={recoveryExpired}
+            onClose={() => { setAuthModalOpen(false); setAuthModalMode(null); setRecoveryExpired(false); }}
             onLoginWithGoogle={loginWithGoogle}
             onLoginWithPassword={loginWithPassword}
             onSignUpWithPassword={signUpWithPassword}

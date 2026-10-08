@@ -58,9 +58,13 @@ export default function AuthModal({
   onRequestPasswordReset,
   onUpdatePassword,
   initialMode,
+  expiredRecovery = false,
 }) {
   // "login" | "signup" | "forgot" | "forgot-sent" | "reset"
   const [mode, setMode] = useState(initialMode || "login");
+
+  const isKeyScreen = mode === "forgot" || mode === "forgot-sent" || mode === "reset";
+  const showBack = isKeyScreen;
 
   const [email,         setEmail]         = useState("");
   const [password,      setPassword]      = useState("");
@@ -213,7 +217,7 @@ export default function AuthModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* ── Header ─────────────────────────────────────────────────── */}
-        <div className="relative px-6 pt-6 pb-4 border-b border-line bg-accent-soft">
+        <div className={`relative px-6 pt-6 pb-4 border-b border-line bg-accent-soft ${showBack ? "pt-11" : ""}`}>
           <button
             onClick={onClose}
             aria-label="Close dialog"
@@ -224,11 +228,11 @@ export default function AuthModal({
           </button>
 
           {/* Back arrow — shown in forgot/reset screens */}
-          {(mode === "forgot" || mode === "forgot-sent" || mode === "reset") && (
+          {showBack && (
             <button
               onClick={goToLogin}
               className="absolute top-4 left-4 flex items-center gap-1 text-[11px] font-medium
-                         text-accent-text hover:text-accent-text transition"
+                         text-accent-text hover:text-accent-text transition min-h-[44px]"
             >
               <ChevronLeft size={13} />
               Back
@@ -237,7 +241,7 @@ export default function AuthModal({
 
           <div className="flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-xl bg-accent text-accent-fg flex items-center justify-center shadow-sm">
-              {mode === "forgot" || mode === "forgot-sent" || mode === "reset"
+              {showBack
                 ? <KeyRound size={16} />
                 : <Sparkles size={16} />}
             </div>
@@ -305,7 +309,18 @@ export default function AuthModal({
 
           {/* ══ FORGOT PASSWORD FORM ════════════════════════════════════ */}
           {mode === "forgot" && (
-            <form onSubmit={handleForgotSubmit} className="space-y-4">
+            <>
+              {expiredRecovery && (
+                <div className="mb-4 p-3 rounded-xl bg-warn-soft border border-warn-line text-xs text-warn-fg
+                                leading-normal flex items-start gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <AlertTriangle size={12} className="text-warn-fg shrink-0 mt-0.5" />
+                  <span>
+                    That reset link has expired or has already been used. Enter your email
+                    below and we&apos;ll send you a new one.
+                  </span>
+                </div>
+              )}
+              <form onSubmit={handleForgotSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-fg mb-1">
                   Email Address
@@ -336,6 +351,7 @@ export default function AuthModal({
                   : <><SendHorizonal size={13} /> Send reset link</>}
               </button>
             </form>
+            </>
           )}
 
           {/* ══ RESET PASSWORD FORM (recovery flow) ═════════════════════ */}
