@@ -1,97 +1,253 @@
 @import "tailwindcss";
 
+/* ══════════════════════════════════════════════════════════════════════
+   Design tokens
+   Light is the default; [data-theme="dark"] swaps the values. Nothing in
+   the JSX may hardcode a surface/text colour — it reads these instead, so
+   a theme change never needs a `dark:` twin of every class.
+   ══════════════════════════════════════════════════════════════════════ */
 :root {
   color-scheme: light;
+
+  --app: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #f1f5f9;
+  --surface-hover: #f1f5f9;
+
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+
+  --fg: #0f172a;
+  --fg-muted: #475569;
+  --fg-subtle: #64748b;
+
+  --accent: #7c3aed;
+  --accent-text: #6d28d9;
+  --accent-fg: #ffffff;
+  --accent-soft: #f5f3ff;
+  --accent-line: #ddd6fe;
+
+  --success-fg: #047857;
+  --success-soft: #ecfdf5;
+  --success-line: #a7f3d0;
+  --warn-fg: #b45309;
+  --warn-soft: #fffbeb;
+  --warn-line: #fde68a;
+  --danger-fg: #b91c1c;
+  --danger-soft: #fef2f2;
+  --danger-line: #fecaca;
+  --info-fg: #0369a1;
+  --info-soft: #f0f9ff;
+  --info-line: #bae6fd;
+
+  /* Neumorphic depth. Light uses the soft-UI dual shadow; dark resolves to
+     flat surfaces with a hairline border + soft drop, because white
+     highlight shadows smear into grey on a near-black canvas. */
+  --neu-bg: #eef0f4;
+  --neu-border: transparent;
+  --neu-convex: 5px 5px 10px #d6d9df, -5px -5px 10px #ffffff;
+  --neu-convex-lg: 8px 8px 16px #d6d9df, -8px -8px 16px #ffffff;
+  --neu-hover: 7px 7px 14px #d2d5dc, -7px -7px 14px #ffffff;
+  --neu-concave: inset 6px 6px 12px #d6d9df, inset -6px -6px 12px #ffffff;
+  --neu-pressed: inset 4px 4px 8px #d6d9df, inset -4px -4px 8px #ffffff;
+  --neu-focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --app: #0b1120;
+  --surface: #1e293b;
+  --surface-2: #182238;
+  --surface-3: #24314b;
+  --surface-hover: #2b3a55;
+
+  --line: #334155;
+  --line-strong: #475569;
+
+  --fg: #e2e8f0;
+  --fg-muted: #cbd5e1;
+  --fg-subtle: #94a3b8;
+
+  --accent: #6d28d9;
+  --accent-text: #a78bfa;
+  --accent-fg: #ffffff;
+  --accent-soft: #2a1a52;
+  --accent-line: #4c1d95;
+
+  --success-fg: #6ee7b7;
+  --success-soft: #052e23;
+  --success-line: #065f46;
+  --warn-fg: #fcd34d;
+  --warn-soft: #2e2205;
+  --warn-line: #713f12;
+  --danger-fg: #fca5a5;
+  --danger-soft: #2f1113;
+  --danger-line: #7f1d1d;
+  --info-fg: #7dd3fc;
+  --info-soft: #082f49;
+  --info-line: #075985;
+
+  --neu-bg: #1e293b;
+  --neu-border: 1px solid #334155;
+  --neu-convex: 0 8px 20px -12px rgb(0 0 0 / 0.75);
+  --neu-convex-lg: 0 10px 28px -14px rgb(0 0 0 / 0.8);
+  --neu-hover: 0 10px 24px -12px rgb(0 0 0 / 0.85);
+  --neu-concave: inset 0 2px 6px -2px rgb(0 0 0 / 0.6);
+  --neu-pressed: inset 0 2px 8px -2px rgb(0 0 0 / 0.7);
+}
+
+/* Expose tokens as Tailwind utilities (bg-surface, text-fg-muted, …).
+   `inline` keeps the generated rules referencing var(--…) so the dark
+   block above cascades into every utility without a `dark:` twin. */
+@theme inline {
+  --color-app: var(--app);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+
+  --color-success-fg: var(--success-fg);
+  --color-success-soft: var(--success-soft);
+  --color-success-line: var(--success-line);
+  --color-warn-fg: var(--warn-fg);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-line: var(--danger-line);
+  --color-info-fg: var(--info-fg);
+  --color-info-soft: var(--info-soft);
+  --color-info-line: var(--info-line);
 }
 
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--app);
+  color: var(--fg);
 }
 
-/* React Flow overrides */
-.react-flow__controls {
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-/* ── Neumorphism trial layer ─────────────────────────────────────────── */
+/* ── Neumorphic surfaces ──────────────────────────────────────────────
+   No !important: these live outside Tailwind's utilities layer, so source
+   order settles ties. Hover/active move the shadow rather than swapping
+   the background — a background swap is what produced hard white
+   rectangles inside the rounded pills. */
 .neu-surface {
-  background: #eef0f4 !important;
-  border: none !important;
-  box-shadow: 8px 8px 16px #d6d9df, -8px -8px 16px #ffffff !important;
+  background: var(--neu-bg);
+  border: var(--neu-border);
+  box-shadow: var(--neu-convex-lg);
 }
 .neu-raised {
-  background: #f3f4f7 !important;
-  border: none !important;
-  box-shadow: 5px 5px 10px #d6d9df, -5px -5px 10px #ffffff !important;
-  transition: box-shadow 160ms ease, transform 160ms ease;
-}
-.neu-raised:active {
-  box-shadow: inset 4px 4px 8px #d6d9df, inset -4px -4px 8px #ffffff !important;
-  transform: scale(0.98);
+  background: var(--neu-bg);
+  border: var(--neu-border);
+  box-shadow: var(--neu-convex);
+  transition: box-shadow 160ms ease;
 }
 .neu-inset {
-  background: #eef0f4 !important;
-  border: none !important;
-  box-shadow: inset 6px 6px 12px #d6d9df, inset -6px -6px 12px #ffffff !important;
+  background: var(--neu-bg);
+  border: var(--neu-border);
+  box-shadow: var(--neu-concave);
 }
-.neu-pressed {
-  background: #eef0f4 !important;
-  border: none !important;
-  box-shadow: inset 4px 4px 8px #d6d9df, inset -4px -4px 8px #ffffff !important;
+.neu-press {
+  background: var(--neu-bg);
+  border: var(--neu-border);
+  box-shadow: var(--neu-convex);
+  transition: box-shadow 160ms ease, transform 160ms ease;
 }
 
-/* ── Dark mode overrides ─────────────────────────────────────────────── */
-[data-theme="dark"] body {
-  background: #0f172a;
-  color-scheme: dark;
+/* Only where a hover can actually fire — sticky hovers on touch would
+   otherwise leave the surface permanently embossed-out. */
+@media (hover: hover) and (pointer: fine) {
+  .neu-raised:hover,
+  .neu-press:hover {
+    box-shadow: var(--neu-hover);
+  }
 }
-[data-theme="dark"] .neu-surface {
-  background: #1e293b !important;
-  box-shadow: 8px 8px 16px #0f172a, -8px -8px 16px #334155 !important;
-}
-[data-theme="dark"] .neu-raised {
-  background: #334155 !important;
-  box-shadow: 5px 5px 10px #0f172a, -5px -5px 10px #475569 !important;
-}
-[data-theme="dark"] .neu-raised:active {
-  box-shadow: inset 4px 4px 8px #0f172a, inset -4px -4px 8px #475569 !important;
-}
-[data-theme="dark"] .neu-inset {
-  background: #1e293b !important;
-  box-shadow: inset 6px 6px 12px #0f172a, inset -6px -6px 12px #334155 !important;
-}
-[data-theme="dark"] .neu-pressed {
-  background: #1e293b !important;
-  box-shadow: inset 4px 4px 8px #0f172a, inset -4px -4px 8px #334155 !important;
-}
-[data-theme="dark"] .themed-scroll::-webkit-scrollbar-track { background: #1e293b; }
-[data-theme="dark"] .themed-scroll::-webkit-scrollbar-thumb { background: #7c3aed; border-color: #1e293b; }
 
-/* Dark surfaces/text/borders — trial layer over hardcoded light utilities */
-[data-theme="dark"] .bg-white { background-color: #1e293b !important; }
-[data-theme="dark"] .bg-slate-50 { background-color: #182238 !important; }
-[data-theme="dark"] .bg-slate-100 { background-color: #243150 !important; }
-[data-theme="dark"] .text-slate-800,
-[data-theme="dark"] .text-slate-700 { color: #e2e8f0 !important; }
-[data-theme="dark"] .text-slate-500,
-[data-theme="dark"] .text-slate-400 { color: #94a3b8 !important; }
-[data-theme="dark"] .border-slate-200,
-[data-theme="dark"] .border-slate-100 { border-color: #334155 !important; }
-[data-theme="dark"] .hover\:bg-slate-50:hover { background-color: #243150 !important; }
-[data-theme="dark"] .hover\:bg-slate-100:hover { background-color: #2b3a55 !important; }
-[data-theme="dark"] textarea::placeholder,
-[data-theme="dark"] input::placeholder { color: #64748b; }
-
-/* GlideSelect dark vars */
-[data-theme="dark"] .glide-select {
-  --gs-surface: #1e293b;
-  --gs-highlight: #4c1d95;
-  --gs-text: #e2e8f0;
-  --gs-accent: #a78bfa;
+.neu-raised:active,
+.neu-press:active,
+.neu-surface:active {
+  box-shadow: var(--neu-pressed);
 }
-[data-theme="dark"] .glide-select__menu { border-color: #334155; }
+/* Block surfaces never scale — shrinking a whole composer card reads as a
+   glitch. Only compact controls get the press transform. */
+.neu-press:active {
+  transform: scale(0.97);
+}
+
+/* Ring the control itself when focused. `:focus-within` is limited to
+   `.neu-raised` (the composer / voice panel wrappers) — applying it to
+   `.neu-surface` would ring the whole chat panel every time the textarea
+   or any child took focus. */
+.neu-surface:focus,
+.neu-raised:focus,
+.neu-inset:focus,
+.neu-press:focus,
+.neu-raised:focus-within {
+  outline: none;
+  box-shadow: var(--neu-focus);
+}
+
+/* ── React Flow theming (library reads these vars) ────────────────────── */
+.react-flow {
+  --xy-background-color: var(--app);
+  --xy-controls-button-background-color: var(--neu-bg);
+  --xy-controls-button-background-color-hover: var(--surface-hover);
+  --xy-controls-button-border-color: var(--line-strong);
+  --xy-controls-button-color: var(--fg-muted);
+  --xy-controls-button-color-hover: var(--fg);
+  --xy-controls-box-shadow: var(--neu-convex-lg);
+  --xy-minimap-background-color: var(--neu-bg);
+  --xy-minimap-background-color-selected: var(--accent-soft);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--app) 72%, transparent);
+  --xy-minimap-node-background-color: var(--line-strong);
+  --xy-minimap-node-stroke-color: transparent;
+  --xy-edge-stroke: var(--line-strong);
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-attribution-background-color: transparent;
+  --xy-attribution-text-color: var(--fg-subtle);
+}
+/* React Flow's own chrome keeps a hairline in both themes — soft-UI drops
+   borders entirely, which left the zoom cluster invisible on a pale canvas. */
+.react-flow__controls {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--neu-bg);
+}
+.react-flow__controls-button {
+  background: var(--neu-bg);
+}
+.react-flow__controls-button:hover {
+  background: var(--surface-hover);
+}
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+.react-flow__minimap {
+  border-radius: 16px;
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--neu-convex-lg);
+  overflow: hidden;
+}
+.react-flow__attribution a {
+  color: inherit;
+}
 
 /* Staggered entrance for suggestion chips (empty state) */
 @keyframes rise-in {
@@ -120,22 +276,22 @@ body {
 /* Theme-colored thin scrollbar for custom dropdowns (voice list, etc.) */
 .themed-scroll {
   scrollbar-width: thin;
-  scrollbar-color: #7c3aed #f5f3ff;
+  scrollbar-color: var(--accent) var(--accent-soft);
 }
 .themed-scroll::-webkit-scrollbar {
   width: 8px;
 }
 .themed-scroll::-webkit-scrollbar-track {
-  background: #f5f3ff;
+  background: var(--accent-soft);
   border-radius: 8px;
 }
 .themed-scroll::-webkit-scrollbar-thumb {
-  background: #7c3aed;
+  background: var(--accent);
   border-radius: 8px;
-  border: 2px solid #f5f3ff;
+  border: 2px solid var(--accent-soft);
 }
 .themed-scroll::-webkit-scrollbar-thumb:hover {
-  background: #6d28d9;
+  background: var(--accent-text);
 }
 
 /* Prevent iOS auto-zoom on focus: inputs must be >=16px on small screens */

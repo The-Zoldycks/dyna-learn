@@ -3,8 +3,9 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
-import { Toaster, toast } from 'sonner'
+import { toast } from 'sonner'
 import { registerSW } from 'virtual:pwa-register'
+import ThemedToaster from './components/ThemedToaster.jsx'
 
 // autoUpdate installs silently — tell the user a new version is ready so
 // they reload deliberately instead of running stale mid-lesson.
@@ -46,6 +47,6 @@ createRoot(document.getElementById('root')).render(
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
-    <Toaster position="bottom-right" richColors closeButton expand={false} theme="light" toastOptions={{ duration: 3500 }} style={{ zIndex: 120 }} />
+    <ThemedToaster />
   </StrictMode>,
 );

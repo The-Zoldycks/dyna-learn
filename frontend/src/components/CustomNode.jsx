@@ -44,10 +44,10 @@ export default function CustomNode({ id, data, selected }) {
   };
 
   const stateStyle = isHighlighted
-    ? "bg-white border border-rose-300 text-rose-800 shadow-[0_4px_24px_rgba(244,63,94,0.2)] ring-4 ring-rose-500/20 animate-[pulse_3s_ease-in-out_infinite]"
+    ? "bg-danger-soft border border-danger-fg text-danger-fg shadow-[0_4px_24px_rgba(244,63,94,0.25)] ring-4 ring-danger-fg/20 animate-[pulse_3s_ease-in-out_infinite]"
     : selected
-    ? "bg-white border border-violet-400 text-violet-900 shadow-lg ring-4 ring-violet-500/10 scale-[1.02]"
-    : "bg-white/90 backdrop-blur-md border border-slate-200/80 text-slate-700 shadow-sm hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5";
+    ? "bg-surface border border-accent text-fg shadow-lg ring-4 ring-accent/15 scale-[1.02]"
+    : "bg-surface border border-line text-fg-muted shadow-sm hover:shadow-md hover:border-line-strong hover:-translate-y-0.5";
 
   // Diamond clip path feels outdated in a modern spatial UI, we ignore shape=diamond and just use rounded-2xl
   const diamondStyle = {};
@@ -58,27 +58,27 @@ export default function CustomNode({ id, data, selected }) {
       style={diamondStyle}
       title={isHighlighted ? "Highlighted — student confusion detected. Review this concept." : undefined}
     >
-      <NodeToolbar isVisible={selected} position={Position.Top} className="mb-2 flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1 rounded-xl shadow-xl border border-slate-800">
+      <NodeToolbar isVisible={selected} position={Position.Top} className="mb-2 flex items-center gap-1 bg-fg p-1 rounded-xl shadow-xl">
         <button 
           onClick={(e) => {
             e.stopPropagation();
             window.dispatchEvent(new CustomEvent('ask-node', { detail: { id, label: data.label } }));
           }}
-          className="px-2.5 py-1 text-white rounded-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
+          className="px-2.5 py-1 text-app rounded-lg text-[11px] font-medium hover:opacity-80 flex items-center gap-1.5 transition-all min-h-[44px]"
         >
-          <Sparkles size={12} className="text-violet-300" /> Explain
+          <Sparkles size={12} className="text-accent-text" /> Explain
         </button>
-        <div className="w-px h-3 bg-slate-700" />
+        <div className="w-px h-3 bg-line-strong" />
         <button 
           onClick={(e) => {
             e.stopPropagation();
             window.dispatchEvent(new CustomEvent('branch-node', { detail: { id, label: data.label } }));
           }}
-          className="px-2.5 py-1 text-white rounded-lg text-[11px] font-medium hover:bg-slate-800 flex items-center gap-1.5 transition-all"
+          className="px-2.5 py-1 text-app rounded-lg text-[11px] font-medium hover:opacity-80 flex items-center gap-1.5 transition-all min-h-[44px]"
         >
-          <Network size={12} className="text-emerald-300" /> Branch out
+          <Network size={12} className="text-success-fg" /> Branch out
         </button>
-        <div className="w-px h-3 bg-slate-700" />
+        <div className="w-px h-3 bg-line-strong" />
         <button 
           onClick={(e) => {
             e.stopPropagation();
@@ -86,18 +86,18 @@ export default function CustomNode({ id, data, selected }) {
           }}
           title="Delete node from canvas"
           aria-label={`Delete ${data.label}`}
-          className="px-2 py-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg text-[11px] transition-all"
+          className="px-2 py-1 text-fg-subtle hover:text-danger-fg rounded-lg text-[11px] transition-all min-h-[44px] min-w-[44px] flex items-center justify-center"
         >
           <Trash2 size={12} />
         </button>
       </NodeToolbar>
-      <Handle type="target" position={Position.Top} className="!bg-slate-300 !w-2 !h-2 !border-none !-top-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
-      <div className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${isHighlighted ? "bg-rose-100/80" : selected ? "bg-violet-100/80" : "bg-slate-100"}`}>
-        <Icon size={16} className={isHighlighted ? "text-rose-600" : selected ? "text-violet-600" : "text-slate-600"} strokeWidth={2.5} />
+      <Handle type="target" position={Position.Top} className="!w-2 !h-2 !border-none !-top-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
+      <div className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${isHighlighted ? "bg-danger-soft" : selected ? "bg-accent-soft" : "bg-surface-3"}`}>
+        <Icon size={16} className={isHighlighted ? "text-danger-fg" : selected ? "text-accent-text" : "text-fg-muted"} strokeWidth={2.5} />
       </div>
       <span className="flex-1 leading-snug text-[13px] tracking-tight whitespace-pre-wrap break-words">{data.label}</span>
-      {isHighlighted && <span role="status" aria-label="Highlighted for review" className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white" />}
-      <Handle type="source" position={Position.Bottom} className="!bg-slate-300 !w-2 !h-2 !border-none !-bottom-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
+      {isHighlighted && <span role="status" aria-label="Highlighted for review" className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-danger-fg rounded-full border-2 border-surface" />}
+      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !border-none !-bottom-1 transition-colors" style={{ background: isHighlighted ? "#fb7185" : selected ? "#8b5cf6" : "#cbd5e1" }} />
     </div>
   );
 }

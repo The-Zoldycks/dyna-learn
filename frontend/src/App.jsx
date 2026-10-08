@@ -37,6 +37,7 @@ import { useImageAttachment } from "./hooks/useImageAttachment.js";
 import { useSessions } from "./hooks/useSessions.js";
 import { useSRS } from "./hooks/useSRS.js";
 import { getLayoutedElements } from "./utils/layout.js";
+import { useTheme, useToken } from "./theme.js";
 import { updateStreakOnLoad, saveSnapshot } from "./utils/storage.js";
 import { buildDiagramSVG, svgToPngBlob, encodeShareHash, decodeShareHash, buildAnkiCSV } from "./utils/export.js";
 import { track } from "./utils/analytics.js";
@@ -205,10 +206,13 @@ export default function App() {
   const [playerOpen, setPlayerOpen] = useState(
     () => { try { return localStorage.getItem("dyna-player-open") === "1"; } catch { return false; } }
   );
-  // Dark mode — persisted, applied via documentElement dataset.theme
-  const [dark, setDark] = useState(
-    () => { try { return localStorage.getItem("dyna-theme") === "dark"; } catch { return false; } }
-  );
+  // Dark mode — owned by src/theme.js so the Toaster and JS-driven colours
+  // (React Flow Background/MiniMap props) resolve the same tokens.
+  const [theme, setTheme] = useTheme();
+  const isDark = theme === "dark";
+  // React Flow's Background + MiniMap take colours as JS props, so read the
+  // live token instead of hardcoding a light hex.
+  const canvasInk = useToken("--line-strong", "#cbd5e1");
 
   const {
     user,
@@ -479,13 +483,6 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem("dyna-fluid", fluidOn ? "1" : "0"); } catch {} }, [fluidOn]);
   useEffect(() => { try { localStorage.setItem("dyna-voice-open", voiceOpen ? "1" : "0"); } catch {} }, [voiceOpen]);
   useEffect(() => { try { localStorage.setItem("dyna-player-open", playerOpen ? "1" : "0"); } catch {} }, [playerOpen]);
-  // Dark mode — persist + apply to documentElement (CSS reads [data-theme="dark"])
-  useEffect(() => {
-    try {
-      localStorage.setItem("dyna-theme", dark ? "dark" : "light");
-      document.documentElement.dataset.theme = dark ? "dark" : "light";
-    } catch {}
-  }, [dark]);
 
   // ---- Helpers ----
   const toggleExpand = (idx) => {
@@ -1204,7 +1201,7 @@ export default function App() {
     if (activeReviewId) {
       reviewCard(activeReviewId, passed);
       setActiveReviewId(null);
-      toast.success(passed ? "Great job! Review interval increased." : "Keep studying! Review scheduled for tomorrow.", { icon: passed ? <Trophy size={14} className="text-violet-600" /> : <Dumbbell size={14} className="text-violet-600" /> });
+      toast.success(passed ? "Great job! Review interval increased." : "Keep studying! Review scheduled for tomorrow.", { icon: passed ? <Trophy size={14} className="text-accent-text" /> : <Dumbbell size={14} className="text-accent-text" /> });
     }
   }, [activeReviewId, reviewCard]);
 
@@ -1265,7 +1262,7 @@ export default function App() {
 
   // ---- JSX ----
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#fafafa] text-slate-900 font-sans antialiased supports-[height:100dvh]:h-[100dvh]">
+    <div className="relative h-screen w-screen overflow-hidden bg-app text-fg font-sans antialiased supports-[height:100dvh]:h-[100dvh]">
       {fluidOn && (
         <Suspense fallback={null}>
           <FluidBackdrop />
@@ -1289,9 +1286,9 @@ export default function App() {
         <div
           role="alert"
           aria-live="assertive"
-          className="absolute top-0 left-0 right-0 z-[100] flex items-center justify-center gap-2 bg-amber-500 text-white text-xs font-semibold py-2 px-4 shadow-md"
+          className="absolute top-0 left-0 right-0 z-[100] flex items-center justify-center gap-2 bg-warn-fg text-app text-xs font-semibold py-2 px-4 shadow-md"
         >
-          <span className="w-2 h-2 rounded-full bg-white animate-pulse shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-app animate-pulse shrink-0" />
           You're offline — the tutor won't respond until your connection is restored.
         </div>
       )}
@@ -1312,18 +1309,17 @@ export default function App() {
           fitView
           minZoom={0.2}
           maxZoom={1.5}
-          className="bg-slate-50"
+          className="bg-app"
         >
-          <Background color="#cbd5e1" gap={24} size={1.5} />
-          <Controls className="mb-[60px] sm:mb-0 bg-white/90 backdrop-blur border-slate-200 shadow-sm" />
+          <Background color={canvasInk} gap={24} size={1.5} />
+          <Controls className="mb-[60px] sm:mb-0" />
 
           {/* Collapsible Canvas Radar Minimap — bottom-right, parked clearly above action bar */}
           {showMinimap && (
             <MiniMap
               position="bottom-right"
-              className="mb-[150px] sm:!bottom-20 sm:mb-0 mr-2 !bg-white/90 !backdrop-blur-md !border !border-slate-200 !rounded-2xl !shadow-lg overflow-hidden"
-              nodeColor={(n) => (n.data?.highlight ? "#fb7185" : "#8b5cf6")}
-              maskColor="rgba(241, 245, 249, 0.7)"
+              className="mb-[150px] sm:!bottom-20 sm:mb-0 mr-2"
+              nodeColor={(n) => (n.data?.highlight ? "#fb7185" : canvasInk)}
               zoomable
               pannable
             />
@@ -1335,48 +1331,48 @@ export default function App() {
               onClick={() => setShowMinimap((prev) => !prev)}
               title={showMinimap ? "Hide canvas minimap" : "Show canvas minimap"}
               aria-label="Toggle canvas minimap"
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-full border shadow-sm transition min-h-[44px] ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-full transition min-h-[44px] ${
                 showMinimap
-                  ? "bg-violet-600 text-white border-violet-600 shadow-xs"
-                  : "bg-white/90 backdrop-blur border-slate-200 text-slate-700 hover:bg-slate-50"
+                  ? "bg-accent text-accent-fg shadow-xs"
+                  : "neu-raised text-fg-muted"
               }`}
             >
-              <Map size={13} /> <span className="hidden sm:inline">{showMinimap ? "Hide Map" : "Minimap"}</span>
+              <Map size={13} className={showMinimap ? "" : "text-accent-text"} /> <span className="hidden sm:inline">{showMinimap ? "Hide Map" : "Minimap"}</span>
             </button>
             <button
               onClick={handleShare}
               disabled={nodes.length <= 1}
-              className="flex items-center gap-1.5 bg-white/90 backdrop-blur border border-slate-200 rounded-full px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:shadow transition disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+              className="flex items-center gap-1.5 neu-raised rounded-full px-4 py-2 text-xs font-medium text-fg-muted transition disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
             >
-              <Network size={14} className="text-violet-600" /> Share
+              <Network size={14} className="text-accent-text" /> Share
             </button>
-            <div className="flex items-center bg-white/90 backdrop-blur border border-slate-200 rounded-full shadow-sm overflow-hidden p-0.5">
+            <div className="flex items-center neu-raised rounded-full overflow-hidden p-0.5">
               <button
                 onClick={handleExportPNG}
                 disabled={nodes.length <= 1}
                 title="Download diagram as PNG image"
                 aria-label="Download diagram as PNG"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px]"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-fg-muted transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px] hover:text-fg"
               >
-                <Download size={13} className="text-violet-600" /> PNG
+                <Download size={13} className="text-accent-text" /> PNG
               </button>
-              <div className="w-px h-3.5 bg-slate-200" />
+              <div className="w-px h-3.5 bg-line" />
               <button
                 onClick={handleExportSVG}
                 disabled={nodes.length <= 1}
                 title="Download diagram as scalable vector SVG"
                 aria-label="Download diagram as SVG"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px]"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-fg-muted transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px] hover:text-fg"
               >
                 SVG
               </button>
-              <div className="w-px h-3.5 bg-slate-200" />
+              <div className="w-px h-3.5 bg-line" />
               <button
                 onClick={handleExportAnki}
                 disabled={nodes.length <= 1}
                 title="Export concepts as Anki flashcards (.csv)"
                 aria-label="Export as Anki flashcards"
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px]"
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-fg-muted transition disabled:opacity-40 disabled:cursor-not-allowed rounded-full min-h-[44px] hover:text-fg"
               >
                 Anki
               </button>
@@ -1385,8 +1381,8 @@ export default function App() {
 
           {/* Highlight legend */}
           {hasHighlightedNodes && (
-            <Panel position="bottom-center" className="mb-[70px] sm:mb-4 flex items-center gap-2 bg-white/90 backdrop-blur border border-rose-200 rounded-full px-4 py-2 text-xs font-medium text-rose-700 shadow-sm pointer-events-none">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0 border border-white" />
+            <Panel position="bottom-center" className="mb-[70px] sm:mb-4 flex items-center gap-2 neu-raised rounded-full px-4 py-2 text-xs font-medium text-danger-fg pointer-events-none">
+              <span className="w-2.5 h-2.5 rounded-full bg-danger-fg animate-pulse shrink-0 border border-surface" />
               Highlighted — confusion detected
             </Panel>
           )}
@@ -1399,10 +1395,10 @@ export default function App() {
       </div>
 
       {/* ── Floating Logo (Top Left) ── */}
-      <div className="absolute top-5 left-5 z-20 hidden lg:flex items-center gap-3 bg-white/80 backdrop-blur-xl px-4 py-2.5 rounded-2xl shadow-sm border border-slate-200/60 pointer-events-none">
+      <div className="absolute top-5 left-5 z-20 hidden lg:flex items-center gap-3 neu-surface px-4 py-2.5 rounded-2xl pointer-events-none">
         <img src="/dyna-learn-logo-blue.png" alt="Dyna-learn" className="h-8 object-contain contrast-125 saturate-150" />
-        <div className="border-l border-slate-300 pl-3">
-          <h1 className="text-[11px] font-bold tracking-widest text-slate-800 uppercase leading-none">Interactive Tutor</h1>
+        <div className="border-l border-line-strong pl-3">
+          <h1 className="text-[11px] font-bold tracking-widest text-fg uppercase leading-none">Interactive Tutor</h1>
         </div>
       </div>
 
@@ -1411,60 +1407,59 @@ export default function App() {
         <div className="hidden sm:flex items-center gap-2">
         <button
           onClick={() => setSessionDrawerOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition min-h-[44px]"
+          className="neu-press flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-fg-muted min-h-[44px]"
           title="Open study workspaces"
         >
-          <FolderKanban size={14} className="text-violet-600" />
+          <FolderKanban size={14} className="text-accent-text" />
           <span className="hidden sm:inline">Sessions</span>
         </button>
         <button
           onClick={() => setTopicExplorerOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition min-h-[44px]"
+          className="neu-press flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-fg-muted min-h-[44px]"
         >
-          <Compass size={14} className="text-violet-600" />
+          <Compass size={14} className="text-accent-text" />
           <span className="hidden sm:inline">Topics</span>
         </button>
         <button
           onClick={() => setJournalOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 hover:shadow-sm transition min-h-[44px]"
+          className="neu-press flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-fg-muted min-h-[44px]"
         >
-          <BookOpen size={14} className="text-violet-600" />
+          <BookOpen size={14} className="text-accent-text" />
           <span className="hidden sm:inline">Journal</span>
         </button>
         </div>
         <button
           onClick={handleSaveWorkspace}
           disabled={nodes.length <= 1 || isSaving}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50 transition shadow-sm min-h-[44px] min-w-[44px] justify-center"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent text-accent-fg text-xs font-semibold hover:brightness-110 disabled:opacity-50 transition shadow-sm min-h-[44px] min-w-[44px] justify-center"
         >
           {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           <span className="hidden sm:inline">{isSaving ? "Saving…" : "Save"}</span>
         </button>
         <button
-          onClick={() => setDark((v) => !v)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white/90 transition min-h-[44px] min-w-[44px] justify-center"
-          title={dark ? "Switch to light mode" : "Switch to dark mode"}
-          aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-          aria-pressed={dark}
+          onClick={() => setTheme(isDark ? "light" : "dark")}
+          className="neu-press flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-fg-muted min-h-[44px] min-w-[44px] justify-center"
+          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          aria-pressed={isDark}
         >
-          {dark ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-slate-500" />}
+          {isDark ? <Sun size={14} className="text-warn-fg" /> : <Moon size={14} className="text-fg-subtle" />}
         </button>
         <div className="hidden sm:flex items-center gap-2">
         <button
           onClick={() => setFluidOn((v) => !v)}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition border min-h-[44px] min-w-[44px] justify-center ${
-            fluidOn
-              ? "bg-violet-50 text-violet-700 border-violet-200/80 shadow-sm"
-              : "text-slate-400 border-transparent hover:text-slate-600"
+          className={`neu-press flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold min-h-[44px] min-w-[44px] justify-center ${
+            fluidOn ? "text-accent-text" : "text-fg-subtle"
           }`}
           title={fluidOn ? "Turn off ambient backdrop" : "Turn on ambient backdrop"}
           aria-label={fluidOn ? "Turn off ambient fluid animation" : "Turn on ambient fluid animation"}
+          aria-pressed={fluidOn}
         >
-          <Droplets size={13} className={fluidOn ? "text-violet-600" : "text-slate-400"} />
+          <Droplets size={13} className={fluidOn ? "text-accent-text" : "text-fg-subtle"} />
         </button>
         <button
           onClick={handleClear}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 text-xs font-semibold transition min-h-[44px]"
+          className="neu-press flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-fg-muted text-xs font-semibold min-h-[44px]"
           title="Clear Canvas"
         >
           <Trash2 size={14} /> <span className="hidden md:inline">Clear</span>
@@ -1477,26 +1472,26 @@ export default function App() {
             aria-expanded={moreOpen}
             aria-haspopup="menu"
             aria-label="More actions"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-white/90 border border-transparent transition min-h-[44px]"
+            className="neu-press flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-fg-muted min-h-[44px]"
           >
-            <MoreHorizontal size={16} className="text-violet-600" />
+            <MoreHorizontal size={16} className="text-accent-text" />
           </button>
           {moreOpen && (
-            <div role="menu" aria-label="More actions" className="absolute right-0 mt-2 w-52 rounded-2xl bg-white border border-slate-200 shadow-xl py-1.5 z-50">
-              <button role="menuitem" onClick={() => { setMoreOpen(false); setSessionDrawerOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
-                <FolderKanban size={14} className="text-violet-600" /> Sessions
+            <div role="menu" aria-label="More actions" className="absolute right-0 mt-2 w-52 rounded-2xl bg-surface border border-line shadow-xl py-1.5 z-50">
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setSessionDrawerOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-fg-muted hover:bg-surface-hover transition text-left min-h-[44px]">
+                <FolderKanban size={14} className="text-accent-text" /> Sessions
               </button>
-              <button role="menuitem" onClick={() => { setMoreOpen(false); setTopicExplorerOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
-                <Compass size={14} className="text-violet-600" /> Topics
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setTopicExplorerOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-fg-muted hover:bg-surface-hover transition text-left min-h-[44px]">
+                <Compass size={14} className="text-accent-text" /> Topics
               </button>
-              <button role="menuitem" onClick={() => { setMoreOpen(false); setJournalOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
-                <BookOpen size={14} className="text-violet-600" /> Journal
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setJournalOpen(true); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-fg-muted hover:bg-surface-hover transition text-left min-h-[44px]">
+                <BookOpen size={14} className="text-accent-text" /> Journal
               </button>
-              <button role="menuitem" onClick={() => { setMoreOpen(false); setFluidOn((v) => !v); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
-                <Droplets size={14} className="text-violet-600" /> {fluidOn ? "Backdrop off" : "Backdrop on"}
+              <button role="menuitem" onClick={() => { setMoreOpen(false); setFluidOn((v) => !v); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-fg-muted hover:bg-surface-hover transition text-left min-h-[44px]">
+                <Droplets size={14} className="text-accent-text" /> {fluidOn ? "Backdrop off" : "Backdrop on"}
               </button>
-              <button role="menuitem" onClick={() => { setMoreOpen(false); handleClear(); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition text-left min-h-[44px]">
-                <Trash2 size={14} className="text-violet-600" /> Clear canvas
+              <button role="menuitem" onClick={() => { setMoreOpen(false); handleClear(); }} className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-medium text-fg-muted hover:bg-surface-hover transition text-left min-h-[44px]">
+                <Trash2 size={14} className="text-accent-text" /> Clear canvas
               </button>
             </div>
           )}
@@ -1514,13 +1509,13 @@ export default function App() {
       </header>
 
       {/* ── Left panel: Chat Sidebar (Floating on Desktop, Full on Mobile) ── */}
-      <div id="chat-panel" className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col neu-surface sm:rounded-[2rem] overflow-hidden transition-transform duration-300 ease-out pb-[calc(60px+env(safe-area-inset-bottom))] sm:pb-0 ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
+      <div id="chat-panel" className={`absolute top-0 left-0 bottom-0 sm:top-20 sm:left-5 sm:bottom-5 w-full sm:w-[400px] z-10 flex flex-col neu-surface sm:rounded-[2rem] overflow-hidden transition-transform duration-300 ease-out pt-[76px] sm:pt-0 pb-[calc(60px+env(safe-area-inset-bottom))] sm:pb-0 ${mobileTab === "chat" ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}`}>
 
           {/* Panel header */}
-          <div className="p-4 border-b border-slate-100 shrink-0">
+          <div className="p-4 border-b border-line shrink-0">
             <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 font-semibold text-slate-800 text-sm">
-                <Sparkles size={14} className="text-violet-600" /> Ask Dyna-learn
+              <h2 className="flex items-center gap-2 font-semibold text-fg text-sm">
+                <Sparkles size={14} className="text-accent-text" /> Ask Dyna-learn
               </h2>
               {chatHistory.length > 0 && (
                 <button
@@ -1529,13 +1524,12 @@ export default function App() {
                     setChatSearchOpen((prev) => !prev);
                     if (chatSearchOpen) setChatSearchQuery("");
                   }}
-                  className={`p-1.5 rounded-lg border transition min-h-[44px] min-w-[44px] flex items-center justify-center ${
-                    chatSearchOpen
-                      ? "bg-violet-100 text-violet-700 border-violet-300"
-                      : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                  className={`neu-press p-1.5 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center ${
+                    chatSearchOpen ? "text-accent-text" : "text-fg-subtle"
                   }`}
                   aria-label={chatSearchOpen ? "Close chat search" : "Search conversation"}
                   title="Search conversation"
+                  aria-pressed={chatSearchOpen}
                 >
                   <Search size={13} />
                 </button>
@@ -1543,20 +1537,20 @@ export default function App() {
             </div>
             {chatSearchOpen && (
               <div className="mt-2.5 relative flex items-center">
-                <Search size={13} className="absolute left-2.5 text-slate-400 pointer-events-none" />
+                <Search size={13} className="absolute left-2.5 text-fg-subtle pointer-events-none" />
                 <input
                   type="text"
                   value={chatSearchQuery}
                   onChange={(e) => setChatSearchQuery(e.target.value)}
                   placeholder="Search discussion..."
-                  className="w-full pl-8 pr-7 py-1.5 text-xs neu-inset rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  className="w-full pl-8 pr-7 py-1.5 text-xs neu-inset rounded-lg"
                   autoFocus
                 />
                 {chatSearchQuery && (
                   <button
                     type="button"
                     onClick={() => setChatSearchQuery("")}
-                    className="absolute right-1 text-slate-400 hover:text-slate-600 text-xs p-0.5 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                    className="absolute right-1 text-fg-subtle hover:text-fg-muted text-xs p-0.5 min-h-[44px] min-w-[44px] flex items-center justify-center"
                     aria-label="Clear search"
                   >
                     ×
@@ -1564,19 +1558,19 @@ export default function App() {
                 )}
               </div>
             )}
-            <p className="text-xs text-slate-500 mt-1">Click a node + ask — tutor adapts to canvas &amp; history.</p>
+            <p className="text-xs text-fg-subtle mt-1">Click a node + ask — tutor adapts to canvas &amp; history.</p>
 
             {/* Selected node badge & quick actions */}
             {selectedNodeId && (
               <div className="mt-3 space-y-2">
-                <div className="flex items-center gap-2 text-xs bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
-                  <MousePointerClick size={12} className="text-violet-600 shrink-0" />
-                  <span className="font-medium text-violet-700 shrink-0">Selected:</span>
-                  <span className="truncate flex-1 font-semibold text-violet-950">{selectedNodeLabel}</span>
+                <div className="flex items-center gap-2 text-xs bg-accent-soft border border-accent-line rounded-lg px-3 py-2">
+                  <MousePointerClick size={12} className="text-accent-text shrink-0" />
+                  <span className="font-medium text-accent-text shrink-0">Selected:</span>
+                  <span className="truncate flex-1 font-semibold text-fg">{selectedNodeLabel}</span>
                   <button
                     onClick={() => setSelectedNodeId(null)}
                     aria-label="Deselect node"
-                    className="text-violet-600 hover:text-violet-800 underline ml-2 text-[11px]"
+                    className="text-accent-text hover:underline ml-2 text-[11px] min-h-[44px]"
                   >
                     Clear
                   </button>
@@ -1588,9 +1582,9 @@ export default function App() {
                       setQuestion(`Explain "${selectedNodeLabel}" in depth and how it works.`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1 min-h-[44px]"
+                    className="neu-press text-[11px] font-medium text-fg-muted hover:text-accent-text px-2.5 py-1 rounded-md inline-flex items-center gap-1 min-h-[44px]"
                   >
-                    <Search size={11} className="text-violet-600" /> Deep dive
+                    <Search size={11} className="text-accent-text" /> Deep dive
                   </button>
                   <button
                     type="button"
@@ -1598,9 +1592,9 @@ export default function App() {
                       setQuestion(`Break down "${selectedNodeLabel}" into sub-concepts on the canvas.`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1 min-h-[44px]"
+                    className="neu-press text-[11px] font-medium text-fg-muted hover:text-accent-text px-2.5 py-1 rounded-md inline-flex items-center gap-1 min-h-[44px]"
                   >
-                    <Sprout size={11} className="text-violet-600" /> Break down
+                    <Sprout size={11} className="text-accent-text" /> Break down
                   </button>
                   <button
                     type="button"
@@ -1608,9 +1602,9 @@ export default function App() {
                       setQuestion(`Quiz me on "${selectedNodeLabel}".`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1 min-h-[44px]"
+                    className="neu-press text-[11px] font-medium text-fg-muted hover:text-accent-text px-2.5 py-1 rounded-md inline-flex items-center gap-1 min-h-[44px]"
                   >
-                    <Target size={11} className="text-violet-600" /> Quiz me
+                    <Target size={11} className="text-accent-text" /> Quiz me
                   </button>
                   <button
                     type="button"
@@ -1618,9 +1612,9 @@ export default function App() {
                       setQuestion(`Give a real-world analogy or example for "${selectedNodeLabel}".`);
                       document.querySelector("textarea")?.focus();
                     }}
-                    className="text-[11px] font-medium bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 px-2.5 py-1 rounded-md transition shadow-sm inline-flex items-center gap-1 min-h-[44px]"
+                    className="neu-press text-[11px] font-medium text-fg-muted hover:text-accent-text px-2.5 py-1 rounded-md inline-flex items-center gap-1 min-h-[44px]"
                   >
-                    <Lightbulb size={11} className="text-violet-600" /> Analogy
+                    <Lightbulb size={11} className="text-accent-text" /> Analogy
                   </button>
                 </div>
               </div>
@@ -1628,8 +1622,8 @@ export default function App() {
 
             {/* Large-canvas warning */}
             {isCanvasLarge && (
-              <div className="mt-2 flex items-center gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                <span className="text-amber-700 inline-flex items-center gap-1.5"><AlertTriangle size={12} className="text-amber-600 shrink-0" /> Large canvas ({nodes.length} nodes) — consider clearing for best AI results.</span>
+              <div className="mt-2 flex items-center gap-2 text-xs bg-warn-soft border border-warn-line rounded-lg px-3 py-2">
+                <span className="text-warn-fg inline-flex items-center gap-1.5"><AlertTriangle size={12} className="text-warn-fg shrink-0" /> Large canvas ({nodes.length} nodes) — consider clearing for best AI results.</span>
               </div>
             )}
 
@@ -1640,13 +1634,13 @@ export default function App() {
                 onClick={() => setVoiceOpen((v) => !v)}
                 aria-expanded={voiceOpen}
                 aria-controls="voice-panel"
-                className="w-full flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 px-3 py-2.5 hover:bg-slate-100/70 transition"
+                className="w-full flex items-center gap-1.5 text-[11px] font-semibold text-fg px-3 py-2.5 transition"
               >
-                <Mic size={12} className="text-violet-600" /> Voice
-                <span className="ml-2 text-[10px] font-medium text-slate-400">
+                <Mic size={12} className="text-accent-text" /> Voice
+                <span className="ml-2 text-[10px] font-medium text-fg-subtle">
                   {edgeVoices.length + browserVoices.length} voices{autoNarrate ? " · auto" : ""}
                 </span>
-                <ChevronDown size={13} className={`ml-auto text-slate-400 transition-transform ${voiceOpen ? "rotate-180" : ""}`} />
+                <ChevronDown size={13} className={`ml-auto text-fg-subtle transition-transform ${voiceOpen ? "rotate-180" : ""}`} />
               </button>
               {voiceOpen && (
               <div id="voice-panel" className="px-3 pb-3">
@@ -1656,20 +1650,20 @@ export default function App() {
                 selectedVoice={selectedVoice}
                 setSelectedVoice={setSelectedVoice}
               />
-              <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-200/60">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
+              <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-line">
+                <label className="flex items-center gap-2 cursor-pointer select-none min-h-[44px]">
                   <input
                     type="checkbox"
                     checked={autoNarrate}
                     onChange={(e) => setAutoNarrate(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                    className="w-3.5 h-3.5 rounded border-line-strong text-accent focus:ring-accent"
                   />
-                  <span className="text-[11px] font-medium text-slate-600">Auto-narrate</span>
+                  <span className="text-[11px] font-medium text-fg-muted">Auto-narrate</span>
                 </label>
                 <button
                   type="button"
                   onClick={cyclePlaybackSpeed}
-                  className="px-2 py-0.5 rounded-md bg-white border border-slate-200 hover:border-violet-300 text-[11px] font-semibold text-violet-700 hover:bg-violet-50 transition"
+                  className="neu-press px-2 py-1 rounded-md text-[11px] font-semibold text-accent-text min-h-[44px]"
                   title="Cycle playback speed (1x, 1.25x, 1.5x, 2x)"
                   aria-label={`Playback speed: ${playbackSpeed}x. Click to change.`}
                 >
@@ -1685,38 +1679,38 @@ export default function App() {
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-0">
             {chatHistory.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-6 mt-10">
-                <div className="w-12 h-12 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center mb-4 shadow-sm border border-violet-200/50">
+                <div className="w-12 h-12 bg-accent-soft text-accent-text rounded-2xl flex items-center justify-center mb-4">
                   <Brain size={24} />
                 </div>
-                <h3 className="text-slate-800 font-semibold mb-2">What do you want to learn?</h3>
-                <p className="text-xs text-slate-500 mb-6 max-w-[220px] leading-relaxed">
+                <h3 className="text-fg font-semibold mb-2">What do you want to learn?</h3>
+                <p className="text-xs text-fg-subtle mb-6 max-w-[220px] leading-relaxed">
                   Pick a starter below, or type your own question.
                 </p>
                 <div className="flex flex-wrap justify-center gap-2 max-w-[320px]">
                   <button
                     onClick={() => setTopicExplorerOpen(true)}
-                    className="rise-in inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 transition shadow-sm min-h-[44px]"
+                    className="rise-in inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-accent text-accent-fg text-xs font-semibold hover:brightness-110 transition shadow-sm min-h-[44px]"
                     style={{ animationDelay: "0ms" }}
                   >
                     <Compass size={13} /> Topic Starters
                   </button>
                   <button
                     onClick={() => { setQuestion("Explain Database Normalization (1NF to BCNF)."); }}
-                    className="rise-in px-3.5 py-2 rounded-full neu-raised text-xs font-medium text-slate-700 hover:text-violet-700 transition min-h-[44px]"
+                    className="rise-in neu-raised px-3.5 py-2 rounded-full text-xs font-medium text-fg-muted hover:text-accent-text min-h-[44px]"
                     style={{ animationDelay: "60ms" }}
                   >
                     Database Normalization
                   </button>
                   <button
                     onClick={() => { setQuestion("How does OAuth 2.0 work?"); }}
-                    className="rise-in px-3.5 py-2 rounded-full neu-raised text-xs font-medium text-slate-700 hover:text-violet-700 transition min-h-[44px]"
+                    className="rise-in neu-raised px-3.5 py-2 rounded-full text-xs font-medium text-fg-muted hover:text-accent-text min-h-[44px]"
                     style={{ animationDelay: "120ms" }}
                   >
                     OAuth 2.0 Auth Code Flow
                   </button>
                   <button
                     onClick={() => { setQuestion("Draw a flowchart for the React Component Lifecycle."); }}
-                    className="rise-in px-3.5 py-2 rounded-full neu-raised text-xs font-medium text-slate-700 hover:text-violet-700 transition min-h-[44px]"
+                    className="rise-in neu-raised px-3.5 py-2 rounded-full text-xs font-medium text-fg-muted hover:text-accent-text min-h-[44px]"
                     style={{ animationDelay: "180ms" }}
                   >
                     React Component Lifecycle
@@ -1726,21 +1720,21 @@ export default function App() {
             ) : (
               <div className="space-y-2">
                 <div className="flex items-center justify-between px-2">
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                  <p className="text-[11px] font-semibold text-fg-subtle uppercase tracking-wide">
                     {chatSearchQuery.trim()
                       ? `Found ${filteredChat.length} match${filteredChat.length === 1 ? "" : "es"}`
                       : "Conversation"}
                   </p>
                   {loading && chatHistory.length > 0 ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-accent-line bg-accent-soft px-2.5 py-1">
                       <img src="/mahoraga-wheel.png" alt="" aria-hidden="true" className="mahoraga-wheel aspect-square object-contain shrink-0" style={{ width: 14, height: 14 }} />
-                      <span className="text-[10px] font-semibold text-violet-700">Adapting</span>
+                      <span className="text-[10px] font-semibold text-accent-text">Adapting</span>
                     </span>
                   ) : chatSearchQuery.trim() ? (
                     <button
                       type="button"
                       onClick={() => setChatSearchQuery("")}
-                      className="text-[11px] text-violet-600 hover:text-violet-800 font-medium"
+                      className="text-[11px] text-accent-text hover:underline font-medium min-h-[44px]"
                     >
                       Clear search
                     </button>
@@ -1748,10 +1742,10 @@ export default function App() {
                 </div>
 
                 {filteredChat.length === 0 ? (
-                  <div className="text-center py-8 px-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 my-2">
-                    <Search size={18} className="mx-auto text-slate-400 mb-1.5" />
-                    <p className="text-xs font-semibold text-slate-700">No matching messages</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Nothing matches &ldquo;{chatSearchQuery}&rdquo;.</p>
+                  <div className="text-center py-8 px-4 rounded-xl border border-dashed border-line bg-surface-2/50 my-2">
+                    <Search size={18} className="mx-auto text-fg-subtle mb-1.5" />
+                    <p className="text-xs font-semibold text-fg-muted">No matching messages</p>
+                    <p className="text-[11px] text-fg-subtle mt-0.5">Nothing matches &ldquo;{chatSearchQuery}&rdquo;.</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1764,14 +1758,14 @@ export default function App() {
                           key={originalIdx}
                           className={`text-[13px] leading-relaxed ${
                             turn.role === "user"
-                              ? "bg-slate-900 text-white rounded-[20px] rounded-br-sm px-4 py-3 ml-8 shadow-sm"
-                              : "text-slate-800 pr-4 mt-2 mb-4"
+                              ? "bg-fg text-app rounded-[20px] rounded-br-sm px-4 py-3 ml-8 shadow-sm"
+                              : "text-fg pr-4 mt-2 mb-4"
                           }`}
                         >
                           {turn.role === "user" ? null : (
                             <div className="flex items-center gap-2 mb-1 opacity-60">
-                              <Sparkles size={12} className="text-violet-600" />
-                              <span className="font-semibold text-[10px] uppercase tracking-wider text-violet-700">Tutor</span>
+                              <Sparkles size={12} className="text-accent-text" />
+                              <span className="font-semibold text-[10px] uppercase tracking-wider text-accent-text">Tutor</span>
                             </div>
                           )}
 
@@ -1784,7 +1778,7 @@ export default function App() {
                           ) : (
                             <div className="mt-1">
                               {turn.image && (
-                                <img src={turn.image} alt="User uploaded" className="max-w-[120px] rounded mb-2 border border-slate-700/50" />
+                                <img src={turn.image} alt="User uploaded" className="max-w-[120px] rounded mb-2 border border-line-strong" />
                               )}
                               <p className="whitespace-pre-wrap break-words">{displayText}</p>
                             </div>
@@ -1793,7 +1787,7 @@ export default function App() {
                           {isLong && (
                             <button
                               onClick={() => toggleExpand(originalIdx)}
-                              className={`mt-2 text-[10px] font-medium flex items-center gap-1 opacity-70 hover:opacity-100 ${turn.role === 'user' ? 'text-white' : 'text-slate-500'}`}
+                              className={`mt-2 text-[10px] font-medium flex items-center gap-1 opacity-70 hover:opacity-100 ${turn.role === 'user' ? 'text-app' : 'text-fg-subtle'}`}
                             >
                               {isExpanded ? <>Show less <ChevronUp size={10} /></> : <>Read more <ChevronDown size={10} /></>}
                             </button>
@@ -1820,27 +1814,27 @@ export default function App() {
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className="relative rounded-2xl neu-raised focus-within:ring-2 focus-within:ring-violet-500 transition overflow-visible"
+              className="relative rounded-2xl neu-raised transition overflow-visible"
             >
               {/* Drag-and-drop overlay */}
               {isDraggingImage && (
-                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-violet-50/95 border-2 border-dashed border-violet-500 rounded-xl backdrop-blur-sm pointer-events-none transition-all">
-                  <Image size={24} className="text-violet-600 mb-1 animate-bounce" />
-                  <p className="text-xs font-semibold text-violet-900">Drop image here to attach</p>
-                  <p className="text-[10px] text-violet-600 mt-0.5">Under 5MB · PNG, JPG, WebP</p>
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-accent-soft border-2 border-dashed border-accent rounded-xl pointer-events-none transition-all">
+                  <Image size={24} className="text-accent-text mb-1 animate-bounce" />
+                  <p className="text-xs font-semibold text-fg">Drop image here to attach</p>
+                  <p className="text-[10px] text-fg-subtle mt-0.5">Under 5MB · PNG, JPG, WebP</p>
                 </div>
               )}
 
               {selectedImage && (
                 <div className="relative inline-block w-fit mb-[-4px]">
-                  <img src={selectedImage.previewUrl} alt="Upload preview" className="h-16 w-auto rounded-md border border-slate-200 shadow-sm" />
+                  <img src={selectedImage.previewUrl} alt="Upload preview" className="h-16 w-auto rounded-md border border-line" />
                   <button
                     type="button"
                     onClick={() => clearImage()}
                     aria-label="Remove attached image"
-                    className="absolute -top-2 -right-2 bg-white rounded-full text-slate-500 hover:text-red-600 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+                    className="absolute -top-2 -right-2 neu-press rounded-full text-fg-subtle hover:text-danger-fg min-h-[44px] min-w-[44px] flex items-center justify-center"
                   >
-                    <XCircle size={16} className="fill-white" />
+                    <XCircle size={16} />
                   </button>
                 </div>
               )}
@@ -1866,7 +1860,7 @@ export default function App() {
                 aria-disabled={loading || isOffline}
                 aria-label="Ask the tutor a question"
                 aria-describedby={loading ? "submit-hint-loading" : isOffline ? "submit-hint-offline" : undefined}
-                className="w-full bg-transparent px-4 pt-3 text-sm placeholder:text-slate-400 focus:outline-none resize-none disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full bg-transparent px-4 pt-3 text-sm placeholder:text-fg-subtle focus:outline-none resize-none disabled:opacity-60 disabled:cursor-not-allowed"
               />
               {/* Composer footer toolbar */}
               <div className="flex items-center gap-1.5 px-3 pb-3">
@@ -1884,7 +1878,7 @@ export default function App() {
                   disabled={loading}
                   aria-label="Upload image"
                   title="Upload image (max 5MB)"
-                  className="flex-none flex items-center justify-center w-10 h-10 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="neu-press flex-none flex items-center justify-center w-10 h-10 rounded-xl text-fg-subtle disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Image size={18} aria-hidden="true" />
                 </button>
@@ -1895,23 +1889,24 @@ export default function App() {
                     disabled={loading}
                     aria-label={isListening ? "Listening… click to stop" : "Click to dictate"}
                     title={isListening ? "Click to stop dictation" : "Click to dictate"}
+                    aria-pressed={isListening}
                     className={`flex-none flex items-center justify-center w-10 h-10 rounded-xl transition ${
                       isListening
-                        ? "bg-red-500 text-white animate-pulse"
-                        : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                        ? "bg-danger-fg text-app animate-pulse"
+                        : "neu-press text-fg-subtle"
                     } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     <Mic size={18} />
                   </button>
                 )}
                 {selectedNodeId && (
-                  <span className="hidden sm:inline-flex items-center gap-1.5 ml-1 px-2.5 py-1.5 rounded-full bg-violet-50 border border-violet-200 text-[11px] font-semibold text-violet-700 max-w-[180px]">
+                  <span className="hidden sm:inline-flex items-center gap-1.5 ml-1 px-2.5 py-1.5 rounded-full bg-accent-soft border border-accent-line text-[11px] font-semibold text-accent-text max-w-[180px]">
                     <span className="truncate">{selectedNodeLabel}</span>
                     <button
                       type="button"
                       onClick={() => setSelectedNodeId(null)}
                       aria-label="Clear selected node"
-                      className="shrink-0 text-violet-400 hover:text-violet-700"
+                      className="shrink-0 text-accent-text hover:text-fg min-h-[44px] min-w-[44px] flex items-center justify-center"
                     >
                       <XCircle size={12} />
                     </button>
@@ -1921,7 +1916,7 @@ export default function App() {
                   type="submit"
                   disabled={loading || isOffline || (!question.trim() && !selectedImage)}
                   aria-label={loading ? "Adapting diagram" : "Send your question to the tutor"}
-                  className="ml-auto flex-none flex items-center justify-center w-10 h-10 rounded-full bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
+                  className="ml-auto flex-none flex items-center justify-center w-10 h-10 rounded-full bg-accent text-accent-fg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
                 >
                   {loading
                     ? <Loader2 size={16} className="animate-spin" aria-hidden="true" />
@@ -1929,14 +1924,14 @@ export default function App() {
                 </button>
               </div>
               {loading && (
-                <p id="submit-hint-loading" className="text-xs text-center text-violet-600 flex items-center justify-center gap-1.5">
+                <p id="submit-hint-loading" className="text-xs text-center text-accent-text flex items-center justify-center gap-1.5 pb-2">
                   <img src="/mahoraga-wheel.png" alt="" aria-hidden="true" className="mahoraga-wheel aspect-square object-contain shrink-0" style={{ width: 16, height: 16 }} />
                   Adapting — canvas will update when done
                 </p>
               )}
               {isOffline && !loading && (
-                <p id="submit-hint-offline" className="text-xs text-center text-amber-600 font-medium flex items-center justify-center gap-1">
-                  <span className="w-3 h-3 flex items-center justify-center"><svg className="w-3 h-3 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></span>
+                <p id="submit-hint-offline" className="text-xs text-center text-warn-fg font-medium flex items-center justify-center gap-1 pb-2">
+                  <span className="w-3 h-3 flex items-center justify-center"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></span>
                   You're offline — reconnect to send a message
                 </p>
               )}
@@ -1951,35 +1946,35 @@ export default function App() {
                   onClick={() => setPlayerOpen((v) => !v)}
                   aria-expanded={playerOpen}
                   aria-controls="last-explanation-panel"
-                  className="w-full flex items-center gap-2 text-xs font-semibold text-slate-700 px-3 py-2.5 hover:bg-slate-50 transition"
+                  className="w-full flex items-center gap-2 text-xs font-semibold text-fg px-3 py-2.5 transition"
                 >
                   {isTTSLoading
-                    ? <Loader2 size={12} className="text-violet-600 animate-spin" />
-                    : <Volume2 size={12} className={isSpeaking ? "text-violet-600 animate-pulse" : ""} />}
+                    ? <Loader2 size={12} className="text-accent-text animate-spin" />
+                    : <Volume2 size={12} className={isSpeaking ? "text-accent-text animate-pulse" : ""} />}
                   Last Explanation
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${
                     isTTSLoading
-                      ? "bg-violet-100 text-violet-700 border-violet-200"
+                      ? "bg-accent-soft text-accent-text"
                       : isPaused
-                      ? "bg-amber-100 text-amber-700 border-amber-200"
+                      ? "bg-warn-soft text-warn-fg"
                       : isSpeaking
-                      ? "bg-violet-600 text-white border-violet-600"
-                      : "bg-white border-slate-200"
+                      ? "bg-accent text-accent-fg"
+                      : "bg-surface-2 text-fg-subtle"
                   }`}>
                     {isTTSLoading ? "Loading audio…" : isPaused ? "Paused" : isSpeaking ? "Playing" : "Ready"}
                   </span>
-                  <ChevronDown size={13} className={`ml-auto text-slate-400 transition-transform ${playerOpen ? "rotate-180" : ""}`} />
+                  <ChevronDown size={13} className={`ml-auto text-fg-subtle transition-transform ${playerOpen ? "rotate-180" : ""}`} />
                 </button>
                 {playerOpen && (
                 <div id="last-explanation-panel" className="px-3 pb-3">
                 <div className="flex gap-1 mb-2">
-                  <button onClick={handleReplay} disabled={isSpeaking || isTTSLoading} className="flex-1 py-1.5 rounded-lg bg-violet-600 text-white text-xs disabled:opacity-40">Replay</button>
-                  <button onClick={isPaused ? resumeSpeech : pauseSpeech} disabled={!isSpeaking && !isPaused} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-200 text-xs disabled:opacity-40">{isPaused ? "Resume" : "Pause"}</button>
-                  <button onClick={stopSpeech} disabled={!isSpeaking && !isPaused && !isTTSLoading} className="flex-1 py-1.5 rounded-lg bg-white border border-slate-200 text-xs disabled:opacity-40">Stop</button>
+                  <button onClick={handleReplay} disabled={isSpeaking || isTTSLoading} className="flex-1 py-1.5 rounded-lg bg-accent text-accent-fg text-xs disabled:opacity-40 min-h-[44px]">Replay</button>
+                  <button onClick={isPaused ? resumeSpeech : pauseSpeech} disabled={!isSpeaking && !isPaused} className="neu-press flex-1 py-1.5 rounded-lg text-xs text-fg-muted disabled:opacity-40 min-h-[44px]">{isPaused ? "Resume" : "Pause"}</button>
+                  <button onClick={stopSpeech} disabled={!isSpeaking && !isPaused && !isTTSLoading} className="neu-press flex-1 py-1.5 rounded-lg text-xs text-fg-muted disabled:opacity-40 min-h-[44px]">Stop</button>
                   <button
                     type="button"
                     onClick={cyclePlaybackSpeed}
-                    className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:border-violet-300 text-xs font-semibold text-violet-700 hover:bg-violet-50 transition"
+                    className="neu-press px-2.5 py-1.5 rounded-lg text-xs font-semibold text-accent-text min-h-[44px]"
                     title="Cycle playback speed"
                     aria-label={`Playback speed: ${playbackSpeed}x. Click to change.`}
                   >
@@ -1992,7 +1987,7 @@ export default function App() {
             )}
           </div>
         </div>
-      <div className="sm:hidden absolute bottom-0 left-0 right-0 z-30 flex bg-white/90 backdrop-blur-md border-t border-slate-200/60 shadow-[0_-4px_24px_rgba(0,0,0,0.05)] pb-[env(safe-area-inset-bottom)]" role="tablist" aria-label="Main navigation">
+      <div className="sm:hidden absolute bottom-0 left-0 right-0 z-30 flex bg-surface border-t border-line pb-[env(safe-area-inset-bottom)]" role="tablist" aria-label="Main navigation">
         <button
           role="tab"
           aria-selected={mobileTab === "chat"}
@@ -2000,8 +1995,8 @@ export default function App() {
           onClick={() => setMobileTab("chat")}
           className={`flex-1 flex flex-col items-center py-3.5 min-h-[44px] text-[11px] font-medium transition ${
             mobileTab === "chat"
-              ? "text-violet-600 border-t-2 border-violet-600 -mt-px bg-violet-50/50"
-              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              ? "text-accent-text border-t-2 border-accent -mt-px bg-accent-soft"
+              : "text-fg-subtle"
           }`}
         >
           <MessageSquare size={18} className="mb-0.5" />
@@ -2014,8 +2009,8 @@ export default function App() {
           onClick={() => setMobileTab("canvas")}
           className={`flex-1 flex flex-col items-center py-3.5 min-h-[44px] text-[11px] font-medium transition ${
             mobileTab === "canvas"
-              ? "text-violet-600 border-t-2 border-violet-600 -mt-px bg-violet-50/50"
-              : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              ? "text-accent-text border-t-2 border-accent -mt-px bg-accent-soft"
+              : "text-fg-subtle"
           }`}
         >
           <Network size={18} className="mb-0.5" />
@@ -2057,7 +2052,7 @@ export default function App() {
             onScore={reviewCard}
             onFinish={() => {
               refreshQueue();
-              toast.success("Great job! Spaced repetition intervals updated.", { icon: <Trophy size={14} className="text-violet-600" /> });
+              toast.success("Great job! Spaced repetition intervals updated.", { icon: <Trophy size={14} className="text-accent-text" /> });
             }}
           />
         </Suspense>

@@ -1,4 +1,5 @@
 import { useMemo, lazy, Suspense } from "react";
+import { useTheme } from "../theme.js";
 
 const SplashCursor = lazy(() => import("./SplashCursor.jsx"));
 
@@ -30,6 +31,7 @@ function hasWebGL() {
 
 // Gates the fluid effect: no WebGL, reduced motion, or touch pointers => no mount.
 export default function FluidBackdrop() {
+  const [theme] = useTheme();
   const allowed = useMemo(() => {
     if (typeof window === "undefined") return false;
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return false;
@@ -39,9 +41,22 @@ export default function FluidBackdrop() {
 
   if (!allowed) return null;
 
+  // The shader is additive, so on a near-black canvas the dye blooms into a
+  // pale blob. Dim it in dark rather than dropping the effect entirely.
   return (
     <Suspense fallback={null}>
-      <SplashCursor {...FLUID_PROPS} />
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 50,
+          pointerEvents: "none",
+          opacity: theme === "dark" ? 0.3 : 1,
+          transition: "opacity 300ms ease",
+        }}
+      >
+        <SplashCursor {...FLUID_PROPS} />
+      </div>
     </Suspense>
   );
 }
