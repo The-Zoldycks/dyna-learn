@@ -40,51 +40,51 @@ export default function TopicExplorerModal({ open, onClose, onSelectTopic }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="topic-explorer-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim backdrop-blur-sm animate-in fade-in duration-200"
     >
       <div
         ref={modalRef}
-        className="relative w-full max-w-2xl max-h-[85vh] flex flex-col bg-white rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden"
+        className="relative w-full max-w-2xl max-h-[85vh] flex flex-col bg-surface rounded-3xl shadow-2xl border border-line overflow-hidden"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0 bg-slate-50/50">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-line shrink-0 bg-surface-2">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-accent-soft text-accent-text flex items-center justify-center shadow-xs">
               <Compass size={20} />
             </div>
             <div>
-              <h2 id="topic-explorer-title" className="text-base font-bold text-slate-900 leading-tight">
+              <h2 id="topic-explorer-title" className="text-base font-bold text-fg leading-tight">
                 Topic Starters
               </h2>
-              <p className="text-xs text-slate-500">Pick a curriculum template to jumpstart interactive learning</p>
+              <p className="text-xs text-fg-muted">Pick a curriculum template to jumpstart interactive learning</p>
             </div>
           </div>
           <button
             onClick={onClose}
             aria-label="Close topic starters"
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition"
+            className="p-2 text-fg-subtle hover:text-fg hover:bg-surface-3 rounded-xl transition"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Search & Category Filter Bar */}
-        <div className="px-6 pt-4 pb-3 border-b border-slate-100 space-y-3 bg-white shrink-0">
+        <div className="px-6 pt-4 pb-3 border-b border-line space-y-3 bg-surface shrink-0">
           {/* Search input */}
           <div className="relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search topics, concepts, architectures..."
-              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:bg-white transition"
+              className="w-full pl-9 pr-8 py-2 bg-surface-2 border border-line rounded-xl text-xs text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent focus:bg-surface transition"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
                 aria-label="Clear search query"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-fg-subtle hover:text-fg-muted"
               >
                 <X size={13} />
               </button>
@@ -99,8 +99,8 @@ export default function TopicExplorerModal({ open, onClose, onSelectTopic }) {
                 onClick={() => setActiveCategory(cat)}
                 className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition ${
                   activeCategory === cat
-                    ? "bg-violet-600 text-white shadow-xs"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    ? "bg-accent text-accent-fg shadow-xs"
+                    : "bg-surface-3 text-fg-muted hover:bg-surface-3"
                 }`}
               >
                 {cat === "all" ? "All Topics" : cat}
@@ -112,13 +112,13 @@ export default function TopicExplorerModal({ open, onClose, onSelectTopic }) {
         {/* Topic Grid */}
         <div className="flex-1 overflow-y-auto p-6 space-y-3">
           {filteredTopics.length === 0 ? (
-            <div className="text-center py-12 bg-slate-50 border border-slate-200/80 rounded-2xl p-6">
-              <Compass size={28} className="mx-auto text-slate-400 mb-2" />
-              <p className="text-sm font-semibold text-slate-800">No topics match "{searchQuery}"</p>
-              <p className="text-xs text-slate-500 mt-1">Try another search term or pick a different category.</p>
+            <div className="text-center py-12 bg-surface-2 border border-line rounded-2xl p-6">
+              <Compass size={28} className="mx-auto text-fg-subtle mb-2" />
+              <p className="text-sm font-semibold text-fg">No topics match "{searchQuery}"</p>
+              <p className="text-xs text-fg-muted mt-1">Try another search term or pick a different category.</p>
               <button
                 onClick={() => { setSearchQuery(""); setActiveCategory("all"); }}
-                className="mt-4 px-4 py-2 bg-white border border-slate-200 text-xs font-medium text-slate-700 rounded-xl hover:bg-slate-100 transition shadow-sm"
+                className="mt-4 px-4 py-2 bg-surface border border-line text-xs font-medium text-fg rounded-xl hover:bg-surface-3 transition shadow-sm"
               >
                 Reset Filters
               </button>
@@ -130,29 +130,29 @@ export default function TopicExplorerModal({ open, onClose, onSelectTopic }) {
                 return (
                   <div
                     key={topic.id}
-                    className="flex flex-col justify-between p-4 rounded-2xl border border-slate-200 bg-white hover:border-violet-300 hover:shadow-md transition-all group"
+                    className="flex flex-col justify-between p-4 rounded-2xl border border-line bg-surface hover:border-accent-line hover:shadow-md transition-all group"
                   >
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 bg-violet-50 border border-violet-200/60 px-2 py-0.5 rounded-md">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-accent-text bg-accent-soft border border-accent-line px-2 py-0.5 rounded-md">
                           {topic.badge}
                         </span>
-                        <span className="text-[10px] text-slate-500 font-medium">
+                        <span className="text-[10px] text-fg-muted font-medium">
                           {topic.nodes.length} nodes
                         </span>
                       </div>
-                      <h3 className="text-sm font-bold text-slate-900 group-hover:text-violet-900 transition flex items-center gap-1.5 mb-1.5">
-                        <IconComponent size={14} className="text-violet-600 shrink-0" />
+                      <h3 className="text-sm font-bold text-fg group-hover:text-fg transition flex items-center gap-1.5 mb-1.5">
+                        <IconComponent size={14} className="text-accent-text shrink-0" />
                         <span>{topic.title}</span>
                       </h3>
-                      <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
+                      <p className="text-xs text-fg-muted leading-relaxed line-clamp-2">
                         {topic.description}
                       </p>
                     </div>
 
                     <button
                       onClick={() => onSelectTopic(topic)}
-                      className="mt-4 flex items-center justify-center gap-1.5 w-full py-2 bg-slate-900 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition shadow-sm"
+                      className="mt-4 flex items-center justify-center gap-1.5 w-full py-2 bg-accent hover:brightness-110 text-accent-fg text-xs font-semibold rounded-xl transition shadow-sm"
                     >
                       Start Lesson <ArrowRight size={13} />
                     </button>

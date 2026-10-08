@@ -1,8 +1,9 @@
 .glide-select {
-  --gs-accent: #7c3aed;
-  --gs-surface: #ffffff;
-  --gs-highlight: #ede9fe;
-  --gs-text: #1e293b;
+  --gs-accent: var(--accent);
+  --gs-surface: var(--surface);
+  --gs-highlight: var(--accent-soft);
+  --gs-text: var(--fg);
+  --gs-line: var(--line);
   --gs-radius: 12px;
   --gs-inner-radius: 8px;
   --gs-chip: 32px;
@@ -34,7 +35,7 @@
   min-height: 44px;
   margin: 0;
   padding: 0 8px 0 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--gs-line);
   border-radius: var(--gs-inner-radius);
   background: var(--gs-surface);
   color: var(--gs-text);
@@ -65,7 +66,7 @@
 
 .glide-select__trigger[aria-expanded='true'] {
   background: color-mix(in srgb, var(--gs-highlight) 60%, var(--gs-surface));
-  box-shadow: 0 0 0 2px #c4b5fd;
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .glide-select__trigger:not(:disabled):active {
@@ -105,8 +106,8 @@
   padding: 4px;
   border-radius: var(--gs-radius);
   background: var(--gs-surface);
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 10px 25px -5px rgb(15 23 42 / 0.12), 0 8px 10px -6px rgb(15 23 42 / 0.08);
+  border: 1px solid var(--gs-line);
+  box-shadow: var(--neu-convex-lg);
   transform-origin: var(--gs-origin);
   opacity: 0;
   transform: scale(0.95);

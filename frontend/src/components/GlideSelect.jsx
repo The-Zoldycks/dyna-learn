@@ -37,10 +37,13 @@ export default function GlideSelect({
   onChange,
   placeholder = 'Select…',
   showTags = true,
-  accentColor = '#7c3aed',
-  surfaceColor = '#ffffff',
-  highlightColor = '#ede9fe',
-  textColor = '#1e293b',
+  // No colour defaults on purpose: these are applied as inline styles, which
+  // would beat the theme tokens in GlideSelect.css and pin the dropdown to a
+  // light palette in dark mode. Pass them only to deliberately override.
+  accentColor,
+  surfaceColor,
+  highlightColor,
+  textColor,
   size = 'md',
   radius = 12,
   menuWidth,
@@ -235,10 +238,10 @@ export default function GlideSelect({
       data-size={size}
       data-disabled={disabled ? '' : undefined}
       style={{
-        '--gs-accent': accentColor,
-        '--gs-surface': surfaceColor,
-        '--gs-highlight': highlightColor,
-        '--gs-text': textColor,
+        ...(accentColor && { '--gs-accent': accentColor }),
+        ...(surfaceColor && { '--gs-surface': surfaceColor }),
+        ...(highlightColor && { '--gs-highlight': highlightColor }),
+        ...(textColor && { '--gs-text': textColor }),
         '--gs-radius': `${radius}px`,
         '--gs-inner-radius': `${Math.max(3, radius - 4)}px`,
         '--gs-chip': `${S.chip}px`,

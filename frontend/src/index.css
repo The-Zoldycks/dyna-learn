@@ -17,6 +17,7 @@
 
   --line: #e2e8f0;
   --line-strong: #cbd5e1;
+  --scrim: rgb(15 23 42 / 0.45);
 
   --fg: #0f172a;
   --fg-muted: #475569;
@@ -65,6 +66,7 @@
 
   --line: #334155;
   --line-strong: #475569;
+  --scrim: rgb(2 6 16 / 0.7);
 
   --fg: #e2e8f0;
   --fg-muted: #cbd5e1;
@@ -110,6 +112,7 @@
 
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-scrim: var(--scrim);
 
   --color-fg: var(--fg);
   --color-fg-muted: var(--fg-muted);

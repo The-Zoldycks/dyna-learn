@@ -13,9 +13,9 @@ function EyeToggle({ visible, onToggle }) {
       type="button"
       onClick={onToggle}
       className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-lg
-                 text-slate-400 hover:text-violet-600 hover:bg-violet-50
+                 text-fg-subtle hover:text-accent-text hover:bg-accent-soft
                  transition-colors duration-150 focus:outline-none focus-visible:ring-2
-                 focus-visible:ring-violet-500"
+                 focus-visible:ring-accent"
       aria-label={visible ? "Hide password" : "Show password"}
       title={visible ? "Hide password" : "Show password"}
       tabIndex={-1}
@@ -30,7 +30,7 @@ function EyeToggle({ visible, onToggle }) {
         {/* EyeOff — fades + scales in when password is visible */}
         <EyeOff
           size={14}
-          className={`absolute text-violet-500 transition-all duration-200
+          className={`absolute text-accent-text transition-all duration-200
             ${visible ? "opacity-100 scale-100" : "opacity-0 scale-50"}`}
         />
       </span>
@@ -39,13 +39,13 @@ function EyeToggle({ visible, onToggle }) {
 }
 
 // ── Strength segment colours (tailwind bg class) ───────────────────────────
-const SEGMENT_COLORS = ["bg-rose-500", "bg-amber-400", "bg-blue-500", "bg-emerald-500"];
+const SEGMENT_COLORS = ["bg-danger-fg", "bg-warn-fg", "bg-info-fg", "bg-success-fg"];
 const STRENGTH_META = [
-  { label: "",          text: "text-slate-400" },
-  { label: "Weak",      text: "text-rose-600"    },
-  { label: "Fair",      text: "text-amber-600"   },
-  { label: "Good",      text: "text-blue-600"    },
-  { label: "Strong",    text: "text-emerald-600" },
+  { label: "",          text: "text-fg-subtle" },
+  { label: "Weak",      text: "text-danger-fg"    },
+  { label: "Fair",      text: "text-warn-fg"   },
+  { label: "Good",      text: "text-info-fg"    },
+  { label: "Strong",    text: "text-success-fg" },
 ];
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ export default function AuthModal({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-scrim backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
@@ -208,17 +208,17 @@ export default function AuthModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="auth-modal-title"
-        className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100
+        className="bg-surface rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-line
                    animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* ── Header ─────────────────────────────────────────────────── */}
-        <div className="relative px-6 pt-6 pb-4 border-b border-slate-100 bg-violet-50/60">
+        <div className="relative px-6 pt-6 pb-4 border-b border-line bg-accent-soft">
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="absolute top-4 right-4 p-1.5 rounded-full text-slate-400
-                       hover:text-slate-600 hover:bg-slate-200/60 transition"
+            className="absolute top-4 right-4 p-1.5 rounded-full text-fg-subtle
+                       hover:text-fg-muted hover:bg-surface-hover transition"
           >
             <X size={16} />
           </button>
@@ -228,7 +228,7 @@ export default function AuthModal({
             <button
               onClick={goToLogin}
               className="absolute top-4 left-4 flex items-center gap-1 text-[11px] font-medium
-                         text-violet-600 hover:text-violet-800 transition"
+                         text-accent-text hover:text-accent-text transition"
             >
               <ChevronLeft size={13} />
               Back
@@ -236,12 +236,12 @@ export default function AuthModal({
           )}
 
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center shadow-sm">
+            <div className="w-8 h-8 rounded-xl bg-accent text-accent-fg flex items-center justify-center shadow-sm">
               {mode === "forgot" || mode === "forgot-sent" || mode === "reset"
                 ? <KeyRound size={16} />
                 : <Sparkles size={16} />}
             </div>
-            <h2 id="auth-modal-title" className="text-base font-bold text-slate-900">
+            <h2 id="auth-modal-title" className="text-base font-bold text-fg">
               {mode === "login"        && "Welcome back to Dyna-learn"}
               {mode === "signup"       && "Create your Dyna-learn Account"}
               {mode === "forgot"       && "Reset your password"}
@@ -249,7 +249,7 @@ export default function AuthModal({
               {mode === "reset"        && "Set a new password"}
             </h2>
           </div>
-          <p className="text-xs text-slate-500 leading-relaxed">
+          <p className="text-xs text-fg-muted leading-relaxed">
             {(mode === "login" || mode === "signup") &&
               "Sync your mind maps, keep your streak alive, and review flashcards on any device."}
             {mode === "forgot" &&
@@ -268,9 +268,9 @@ export default function AuthModal({
 
           {/* Error banner */}
           {errorMsg && (
-            <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700
+            <div className="mb-4 p-3 rounded-xl bg-danger-soft border border-danger-line text-xs text-danger-fg
                             leading-normal flex items-start gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
-              <AlertTriangle size={12} className="text-red-500 shrink-0 mt-0.5" />
+              <AlertTriangle size={12} className="text-danger-fg shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
           )}
@@ -278,15 +278,15 @@ export default function AuthModal({
           {/* ══ FORGOT-SENT SUCCESS SCREEN ══════════════════════════════ */}
           {mode === "forgot-sent" && (
             <div className="flex flex-col items-center gap-4 py-4">
-              <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center">
-                <SendHorizonal size={26} className="text-emerald-600" />
+              <div className="w-14 h-14 rounded-full bg-success-soft flex items-center justify-center">
+                <SendHorizonal size={26} className="text-success-fg" />
               </div>
-              <p className="text-xs text-slate-500 text-center leading-relaxed max-w-xs">
+              <p className="text-xs text-fg-muted text-center leading-relaxed max-w-xs">
                 {resetEmail ? "Didn't receive it? Check your spam folder or " : "Confirm your email, then come back and "}
                 <button
                   type="button"
                   onClick={() => { setMode("forgot"); setErrorMsg(""); }}
-                  className="text-violet-600 font-semibold hover:underline"
+                  className="text-accent-text font-semibold hover:underline"
                 >
                   try again
                 </button>.
@@ -294,7 +294,7 @@ export default function AuthModal({
               <button
                 onClick={goToLogin}
                 className="mt-1 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
-                           bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold
+                           bg-accent hover:brightness-110 text-accent-fg text-xs font-semibold
                            shadow-sm transition"
               >
                 Back to sign in
@@ -307,11 +307,11 @@ export default function AuthModal({
           {mode === "forgot" && (
             <form onSubmit={handleForgotSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-fg mb-1">
                   Email Address
                 </label>
                 <div className="relative">
-                  <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
                   <input
                     type="email"
                     required
@@ -319,8 +319,8 @@ export default function AuthModal({
                     value={resetEmail}
                     onChange={(e) => setResetEmail(e.target.value)}
                     placeholder="student@example.com"
-                    className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50
-                               focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                    className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-line bg-surface-2
+                               focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent transition"
                   />
                 </div>
               </div>
@@ -328,7 +328,7 @@ export default function AuthModal({
                 type="submit"
                 disabled={loading}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
-                           bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold
+                           bg-accent hover:brightness-110 text-accent-fg text-xs font-semibold
                            shadow-sm transition disabled:opacity-50"
               >
                 {loading
@@ -342,38 +342,38 @@ export default function AuthModal({
           {mode === "reset" && (
             <form onSubmit={handleResetSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">New Password</label>
+                <label className="block text-xs font-semibold text-fg mb-1">New Password</label>
                 <div className="relative">
-                  <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
                   <input
                     type={showPassword ? "text" : "password"}
                     required
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full pl-9 pr-10 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                    className="w-full pl-9 pr-10 py-2 text-xs rounded-xl border border-line bg-surface-2 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent transition"
                   />
                   <EyeToggle visible={showPassword} onToggle={() => setShowPassword((p) => !p)} />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Confirm Password</label>
+                <label className="block text-xs font-semibold text-fg mb-1">Confirm Password</label>
                 <div className="relative">
-                  <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
                   <input
                     type={showPassword ? "text" : "password"}
                     required
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                    className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-line bg-surface-2 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent transition"
                   />
                 </div>
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold shadow-sm transition disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-accent hover:brightness-110 text-accent-fg text-xs font-semibold shadow-sm transition disabled:opacity-50"
               >
                 {loading ? <Loader2 size={14} className="animate-spin" /> : <>Update password<ArrowRight size={13} /></>}
               </button>
@@ -389,8 +389,8 @@ export default function AuthModal({
                 onClick={handleGoogle}
                 disabled={loading}
                 className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl
-                           border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold
-                           text-slate-700 transition shadow-sm disabled:opacity-50"
+                           border border-line bg-surface hover:bg-surface-2 text-xs font-semibold
+                           text-fg transition shadow-sm disabled:opacity-50"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -402,25 +402,25 @@ export default function AuthModal({
               </button>
 
               <div className="flex items-center gap-3 my-4">
-                <div className="flex-1 h-px bg-slate-200" />
-                <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">or with email</span>
-                <div className="flex-1 h-px bg-slate-200" />
+                <div className="flex-1 h-px bg-surface-3" />
+                <span className="text-[11px] font-medium text-fg-subtle uppercase tracking-wider">or with email</span>
+                <div className="flex-1 h-px bg-surface-3" />
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-3">
                 {/* Name field (sign up only) */}
                 {mode === "signup" && (
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Your Name</label>
+                    <label className="block text-xs font-semibold text-fg mb-1">Your Name</label>
                     <div className="relative">
-                      <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
                       <input
                         type="text"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         placeholder="e.g. Alex Turing"
-                        className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50
-                                   focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-line bg-surface-2
+                                   focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent transition"
                       />
                     </div>
                   </div>
@@ -428,17 +428,17 @@ export default function AuthModal({
 
                 {/* Email */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address</label>
+                  <label className="block text-xs font-semibold text-fg mb-1">Email Address</label>
                   <div className="relative">
-                    <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
                     <input
                       type="email"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="student@example.com"
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50
-                                 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-line bg-surface-2
+                                 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent transition"
                     />
                   </div>
                 </div>
@@ -446,7 +446,7 @@ export default function AuthModal({
                 {/* Password */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold text-slate-700">Password</label>
+                    <label className="block text-xs font-semibold text-fg">Password</label>
                     {/* Strength label (sign-up only, when typing) */}
                     {mode === "signup" && password && (
                       <span className={`text-[10px] font-bold uppercase tracking-wider
@@ -459,7 +459,7 @@ export default function AuthModal({
                       <button
                         type="button"
                         onClick={() => { setMode("forgot"); setResetEmail(email); setErrorMsg(""); }}
-                        className="text-[10px] font-semibold text-violet-500 hover:text-violet-700
+                        className="text-[10px] font-semibold text-accent-text hover:text-accent-text
                                    hover:underline transition"
                       >
                         Forgot password?
@@ -468,15 +468,15 @@ export default function AuthModal({
                   </div>
 
                   <div className="relative">
-                    <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
                     <input
                       type={showPassword ? "text" : "password"}
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full pl-9 pr-10 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50
-                                 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 transition"
+                      className="w-full pl-9 pr-10 py-2 text-xs rounded-xl border border-line bg-surface-2
+                                 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-accent transition"
                     />
                     <EyeToggle visible={showPassword} onToggle={() => setShowPassword((p) => !p)} />
                   </div>
@@ -490,7 +490,7 @@ export default function AuthModal({
                         {[1, 2, 3, 4].map((level) => (
                           <div
                             key={level}
-                            className="h-1.5 rounded-full overflow-hidden bg-slate-200"
+                            className="h-1.5 rounded-full overflow-hidden bg-surface-3"
                           >
                             <div
                               className={`h-full rounded-full transition-all duration-400 ease-out
@@ -507,21 +507,21 @@ export default function AuthModal({
                           <div
                             key={idx}
                             className={`flex items-center gap-1.5 text-[10px] transition-colors duration-300
-                              ${rule.met ? "text-emerald-700 font-medium" : "text-slate-400"}`}
+                              ${rule.met ? "text-success-fg font-medium" : "text-fg-subtle"}`}
                           >
                             {/* Checkmark circle — scales in when rule is met */}
                             <span
                               className={`flex items-center justify-center w-3.5 h-3.5 rounded-full
                                          transition-all duration-250 ease-out
                                          ${rule.met
-                                           ? "bg-emerald-500 scale-110"
-                                           : "bg-slate-200 scale-90"}`}
+                                           ? "bg-success-fg scale-110"
+                                           : "bg-surface-3 scale-90"}`}
                             >
                               <Check
                                 size={8}
                                 strokeWidth={3}
                                 className={`transition-all duration-200
-                                  ${rule.met ? "text-white opacity-100" : "text-slate-300 opacity-60"}`}
+                                  ${rule.met ? "text-app opacity-100" : "text-fg-subtle opacity-60"}`}
                               />
                             </span>
                             <span className="truncate">{rule.label}</span>
@@ -537,7 +537,7 @@ export default function AuthModal({
                   type="submit"
                   disabled={loading}
                   className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 rounded-xl
-                             bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold
+                             bg-accent hover:brightness-110 text-accent-fg text-xs font-semibold
                              shadow-sm transition disabled:opacity-50"
                 >
                   {loading
@@ -549,23 +549,23 @@ export default function AuthModal({
               {/* Toggle login ↔ signup */}
               <div className="mt-4 text-center">
                 {mode === "login" ? (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-fg-muted">
                     Don't have an account yet?{" "}
                     <button
                       type="button"
                       onClick={() => { setMode("signup"); setErrorMsg(""); setShowPassword(false); }}
-                      className="text-violet-600 font-semibold hover:underline"
+                      className="text-accent-text font-semibold hover:underline"
                     >
                       Create one free
                     </button>
                   </p>
                 ) : (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-fg-muted">
                     Already have an account?{" "}
                     <button
                       type="button"
                       onClick={() => { setMode("login"); setErrorMsg(""); setShowPassword(false); }}
-                      className="text-violet-600 font-semibold hover:underline"
+                      className="text-accent-text font-semibold hover:underline"
                     >
                       Sign in
                     </button>

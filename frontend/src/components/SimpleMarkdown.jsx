@@ -9,14 +9,14 @@ function CodeBlock({ code, lang }) {
   };
 
   return (
-    <div className="relative my-2 rounded-xl bg-slate-900 text-slate-100 p-3 text-xs font-mono overflow-x-auto border border-slate-800 shadow-sm">
-      <div className="flex items-center justify-between mb-1.5 text-[10px] text-slate-400 font-bold tracking-wider">
+    <div className="relative my-2 rounded-xl bg-surface-3 text-fg p-3 text-xs font-mono overflow-x-auto border border-line">
+      <div className="flex items-center justify-between mb-1.5 text-[10px] text-fg-subtle font-bold tracking-wider">
         <span>{lang ? lang.toUpperCase() : "CODE"}</span>
         <button
           type="button"
           onClick={handleCopy}
           aria-label="Copy code"
-          className="text-[10px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 transition font-sans"
+          className="text-[10px] text-fg-muted hover:text-fg px-2 py-1 rounded-md bg-surface hover:bg-surface-hover transition font-sans min-h-[44px]"
         >
           {copied ? "Copied!" : "Copy"}
         </button>
@@ -78,7 +78,7 @@ export default function SimpleMarkdown({ text, className = "" }) {
     // Headings
     if (trimmed.startsWith("### ")) {
       elements.push(
-        <h4 key={`h3-${i}`} className="font-bold text-slate-900 text-sm mt-2.5 mb-1 tracking-tight">
+        <h4 key={`h3-${i}`} className="font-bold text-fg text-sm mt-2.5 mb-1 tracking-tight">
           {parseInline(trimmed.slice(4))}
         </h4>
       );
@@ -86,7 +86,7 @@ export default function SimpleMarkdown({ text, className = "" }) {
     }
     if (trimmed.startsWith("## ")) {
       elements.push(
-        <h3 key={`h2-${i}`} className="font-bold text-slate-900 text-[15px] mt-3 mb-1 tracking-tight">
+        <h3 key={`h2-${i}`} className="font-bold text-fg text-[15px] mt-3 mb-1 tracking-tight">
           {parseInline(trimmed.slice(3))}
         </h3>
       );
@@ -94,7 +94,7 @@ export default function SimpleMarkdown({ text, className = "" }) {
     }
     if (trimmed.startsWith("# ")) {
       elements.push(
-        <h2 key={`h1-${i}`} className="font-bold text-slate-900 text-base mt-3.5 mb-1.5 tracking-tight">
+        <h2 key={`h1-${i}`} className="font-bold text-fg text-base mt-3.5 mb-1.5 tracking-tight">
           {parseInline(trimmed.slice(2))}
         </h2>
       );
@@ -104,7 +104,7 @@ export default function SimpleMarkdown({ text, className = "" }) {
     // Blockquotes
     if (trimmed.startsWith("> ")) {
       elements.push(
-        <blockquote key={`quote-${i}`} className="border-l-2 border-violet-500 pl-3 italic text-slate-600 my-1 text-xs leading-relaxed">
+        <blockquote key={`quote-${i}`} className="border-l-2 border-accent pl-3 italic text-fg-muted my-1 text-xs leading-relaxed">
           {parseInline(trimmed.slice(2))}
         </blockquote>
       );
@@ -116,7 +116,7 @@ export default function SimpleMarkdown({ text, className = "" }) {
     if (numMatch) {
       elements.push(
         <div key={`num-${i}`} className="flex items-start gap-2 mt-0.5 pl-1 text-[13px] leading-relaxed">
-          <span className="shrink-0 font-mono text-[11px] font-bold text-violet-700 pt-0.5">{numMatch[1]}.</span>
+          <span className="shrink-0 font-mono text-[11px] font-bold text-accent-text pt-0.5">{numMatch[1]}.</span>
           <span className="flex-1">{parseInline(numMatch[2])}</span>
         </div>
       );
@@ -127,7 +127,7 @@ export default function SimpleMarkdown({ text, className = "" }) {
     if (/^[-*]\s/.test(trimmed)) {
       elements.push(
         <div key={`bullet-${i}`} className="flex items-start gap-2 mt-0.5 pl-1 text-[13px] leading-relaxed">
-          <span className="mt-2 w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0 opacity-75" />
+          <span className="mt-2 w-1.5 h-1.5 rounded-full bg-accent-text shrink-0 opacity-75" />
           <span className="flex-1">{parseInline(trimmed.replace(/^[-*]\s+/, ""))}</span>
         </div>
       );
@@ -175,13 +175,13 @@ function parseInline(text) {
     const token = match[0];
     if (token.startsWith("**")) {
       parts.push(
-        <strong key={key++} className="font-semibold text-slate-900">
+        <strong key={key++} className="font-semibold text-fg">
           {token.slice(2, -2)}
         </strong>
       );
     } else if (token.startsWith("*")) {
       parts.push(
-        <em key={key++} className="italic text-slate-800">
+        <em key={key++} className="italic text-fg">
           {token.slice(1, -1)}
         </em>
       );
@@ -189,7 +189,7 @@ function parseInline(text) {
       parts.push(
         <code
           key={key++}
-          className="bg-slate-100 text-violet-700 rounded px-1.5 py-0.5 text-[11px] font-mono border border-slate-200/60"
+          className="bg-surface-3 text-accent-text rounded px-1.5 py-0.5 text-[11px] font-mono border border-line"
         >
           {token.slice(1, -1)}
         </code>

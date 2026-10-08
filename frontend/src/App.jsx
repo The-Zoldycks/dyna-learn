@@ -1320,6 +1320,7 @@ export default function App() {
               position="bottom-right"
               className="mb-[150px] sm:!bottom-20 sm:mb-0 mr-2"
               nodeColor={(n) => (n.data?.highlight ? "#fb7185" : canvasInk)}
+              ariaLabel="Canvas minimap"
               zoomable
               pannable
             />
