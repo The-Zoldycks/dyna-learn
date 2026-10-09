@@ -18,7 +18,7 @@ export function useTTS(apiBase) {
   const [browserVoices, setBrowserVoices] = useState([]);
   const [edgeVoices, setEdgeVoices] = useState([]);
   const [selectedVoice, setSelectedVoice] = useState(
-    () => readLS("dyna-voice", "en-US-AriaNeural")
+    () => readLS("dyna-voice", "en-US-AvaNeural")
   );
   const [playbackSpeed, setPlaybackSpeed] = useState(
     () => parseFloat(readLS("dyna-speech-speed", "1")) || 1
@@ -51,12 +51,32 @@ export function useTTS(apiBase) {
     const ctrl = new AbortController();
     fetch(`${apiBase}/api/tts/voices`, { signal: ctrl.signal })
       .then((r) => r.json())
-      .then((data) => { if (data.voices?.length) setEdgeVoices(data.voices); })
+      .then((data) => {
+        const list = data.voices;
+        if (!list?.length) return;
+        setEdgeVoices(list);
+        // The curated list is deliberately small, so a previously-stored voice
+        // may not exist in it any more. Without this the picker would show
+        // "Choose a voice" with nothing selected while playback still worked,
+        // because /api/tts validates the id format rather than the allowlist.
+        setSelectedVoice((cur) =>
+          list.some((v) => v.id === cur) ? cur : list[0].id
+        );
+      })
       .catch((err) => { if (err?.name !== "AbortError") console.warn("Edge voices unavailable, using browser voices:", err.message); });
 
     const loadVoices = () => {
       const voices = window.speechSynthesis?.getVoices() || [];
-      if (voices.length) setBrowserVoices(voices);
+      if (!voices.length) return;
+      // The OS list includes every language pack ever installed (en, zh-CN,
+      // ja, …). Only English ones are any use to a tutor, and they're the
+      // offline fallback — the voice picker shows them only when Edge is
+      // unreachable, so filtering here keeps that fallback usable rather
+      // than 55 entries the user has to scroll past.
+      const english = voices.filter(
+        (v) => typeof v.lang === "string" && /^en([-_]|$)/i.test(v.lang)
+      );
+      setBrowserVoices(english);
     };
     loadVoices();
     window.speechSynthesis?.addEventListener?.("voiceschanged", loadVoices);

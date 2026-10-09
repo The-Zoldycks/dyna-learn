@@ -1663,7 +1663,11 @@ export default function App() {
               >
                 <Mic size={12} className="text-accent-text" /> Voice
                 <span className="ml-2 text-[10px] font-medium text-fg-subtle">
-                  {edgeVoices.length + browserVoices.length} voices{autoNarrate ? " · auto" : ""}
+                  {edgeVoices.length
+                    ? `${edgeVoices.length} voices`
+                    : browserVoices.length
+                      ? `${browserVoices.length} offline`
+                      : "loading…"}{autoNarrate ? " · auto" : ""}
                 </span>
                 <ChevronDown size={13} className={`ml-auto text-fg-subtle transition-transform ${voiceOpen ? "rotate-180" : ""}`} />
               </button>

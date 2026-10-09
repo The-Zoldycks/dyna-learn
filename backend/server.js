@@ -581,18 +581,32 @@ Rules:
 const EDGE_TOKEN = process.env.EDGE_TOKEN || "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const EDGE_VOICE_LIST_URL = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=${EDGE_TOKEN}`;
 
-// Curated English voices — a small set of long-lived Edge neural voices.
-// The previous filter (en/zh/ja/ko, first 30) surfaced ~30 mostly duplicated
-// voices including CJK ones the English tutor never uses. Order here is the
-// order the user sees, so the list is stable across Bing's own reshuffles.
+// Curated English voices — a small, stable set covering the accents a tutor
+// is actually needed in, each with a male and female option where the vendor
+// provides one. The previous filter ([a-z]{2}-[A-Z]{2} locales, first 30)
+// surfaced ~30 mostly duplicated voices plus CJK ones the English tutor never
+// uses, and the order changed whenever Bing reshuffled its list.
+// Labels carry the accent because "Sonia" alone tells you nothing about
+// which English you're about to hear.
+// Note: no vendor categorises voices by ethnicity, so there is nothing to
+// select for that — the deeper US males are simply the ones closest to the
+// register people usually mean.
 const CURATED_EDGE_VOICES = [
-  { id: "en-US-AriaNeural", label: "Aria — Warm, conversational (US)", gender: "Female", lang: "en-US" },
-  { id: "en-US-GuyNeural", label: "Guy — Neutral, clear (US)", gender: "Male", lang: "en-US" },
-  { id: "en-US-JennyNeural", label: "Jenny — Bright, upbeat (US)", gender: "Female", lang: "en-US" },
-  { id: "en-US-AvaNeural", label: "Ava — Precise, instructional (US)", gender: "Female", lang: "en-US" },
-  { id: "en-US-AndrewNeural", label: "Andrew — Calm, explanatory (US)", gender: "Male", lang: "en-US" },
-  { id: "en-GB-SoniaNeural", label: "Sonia — Soft, measured (UK)", gender: "Female", lang: "en-GB" },
-  { id: "en-GB-RyanNeural", label: "Ryan — Documentary narration (UK)", gender: "Male", lang: "en-GB" },
+  // American — the default tutors
+  { id: "en-US-AndrewNeural",     label: "Andrew — American male · clear",        gender: "Male",   lang: "en-US" },
+  { id: "en-US-BrianNeural",      label: "Brian — American male · deep",          gender: "Male",   lang: "en-US" },
+  { id: "en-US-GuyNeural",        label: "Guy — American male · warm",           gender: "Male",   lang: "en-US" },
+  { id: "en-US-AvaNeural",        label: "Ava — American female · warm",          gender: "Female", lang: "en-US" },
+  { id: "en-US-MichelleNeural",   label: "Michelle — American female · bright",    gender: "Female", lang: "en-US" },
+  { id: "en-US-JennyNeural",      label: "Jenny — American female · conversational", gender: "Female", lang: "en-US" },
+  // British
+  { id: "en-GB-RyanNeural",       label: "Ryan — British male · documentary",     gender: "Male",   lang: "en-GB" },
+  { id: "en-GB-ThomasNeural",     label: "Thomas — British male · steady",        gender: "Male",   lang: "en-GB" },
+  { id: "en-GB-SoniaNeural",      label: "Sonia — British female · soft",         gender: "Female", lang: "en-GB" },
+  { id: "en-GB-LibbyNeural",      label: "Libby — British female · measured",     gender: "Female", lang: "en-GB" },
+  // Nigerian English — exists on the same free tier
+  { id: "en-NG-AbeoNeural",       label: "Abeo — Nigerian male",                  gender: "Male",   lang: "en-NG" },
+  { id: "en-NG-EzinneNeural",     label: "Ezinne — Nigerian female",              gender: "Female", lang: "en-NG" },
 ];
 const CURATED_EDGE_IDS = new Set(CURATED_EDGE_VOICES.map((v) => v.id));
 

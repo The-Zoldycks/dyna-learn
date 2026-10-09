@@ -1,18 +1,24 @@
 import GlideSelect from "./GlideSelect.jsx";
 
 // VoiceSelect — thin wrapper that maps our voice sources into the
-// GlideSelect micro-select: Neural voices tagged, Offline/browser tagged,
-// grouped by the tag field instead of two optgroups so the gliding pill
-// can travel across the whole list.
+// GlideSelect micro-select.
+//
+// Edge neural voices are the real list: a curated, accent-labelled set from
+// the backend. The browser's own speechSynthesis voices are only an offline
+// fallback — they are shown when Edge TTS is unreachable, never alongside it,
+// because dumping ~50 system voices (most of them non-English) next to a
+// curated twelve makes the picker unusable.
 export default function VoiceSelect({ edgeVoices, browserVoices, selectedVoice, setSelectedVoice }) {
-  const options = [
-    ...(edgeVoices.length
-      ? edgeVoices.map((v) => ({ value: v.id, label: v.label, tag: "Neural" }))
-      : [{ value: "en-US-AriaNeural", label: "Aria — Warm female (US) — loading…", tag: "Neural" }]),
-    ...(browserVoices.length
-      ? browserVoices.map((v) => ({ value: v.name, label: `${v.name} — ${v.lang}`, tag: "Offline" }))
-      : [{ value: "", label: "Default system voice", tag: "Offline" }]),
-  ];
+  const neural = edgeVoices.length
+    ? edgeVoices.map((v) => ({ value: v.id, label: v.label, tag: "Neural" }))
+    : // No Edge list yet (or it failed): fall back to the system voices.
+      browserVoices.map((v) => ({
+        value: v.name || v.voiceURI,
+        label: voiceName(v),
+        tag: "Offline",
+      }));
+
+  const options = neural.length ? neural : [{ value: "", label: "Default system voice", tag: "Offline" }];
 
   return (
     <GlideSelect
@@ -27,4 +33,12 @@ export default function VoiceSelect({ edgeVoices, browserVoices, selectedVoice, 
       className="w-full"
     />
   );
+}
+
+// "Microsoft David - English (United States) - English (United States)"
+// becomes "David — English (US)".
+function voiceName(v) {
+  const raw = String(v.name || v.voiceURI || "System voice");
+  const short = raw.replace(/^Microsoft\s+/i, "").split(/\s+-\s+/)[0].trim();
+  return short || raw;
 }
