@@ -59,6 +59,7 @@ export default function AuthModal({
   onUpdatePassword,
   initialMode,
   expiredRecovery = false,
+  onExpiredRecoveryCleared,
 }) {
   // "login" | "signup" | "forgot" | "forgot-sent" | "reset"
   const [mode, setMode] = useState(initialMode || "login");
@@ -176,6 +177,10 @@ export default function AuthModal({
     try {
       await onRequestPasswordReset(resetEmail);
       setMode("forgot-sent");
+      // Clear the expired-link notice — it described the link we just
+      // replaced, and leaving it up next to "Check your inbox" contradicts
+      // the success state.
+      onExpiredRecoveryCleared?.();
     } catch (err) {
       setErrorMsg(err.message || "Could not send reset email. Please try again.");
     } finally {

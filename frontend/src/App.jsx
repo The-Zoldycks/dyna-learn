@@ -14,7 +14,7 @@ import {
   Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
   MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search, Droplets, FolderKanban,
-  Target, Lightbulb, Sprout, AlertTriangle, Trophy, Dumbbell, MoreHorizontal, Moon, Sun,
+  Target, Lightbulb, Sprout, AlertTriangle, Trophy, Dumbbell, MoreHorizontal, Moon, Sun, Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import CustomNode from "./components/CustomNode.jsx";
@@ -155,7 +155,7 @@ export default function App() {
 
   // Unified speech (Edge Neural + browser fallback) — extracted hook
   const {
-    browserVoices, edgeVoices, selectedVoice, setSelectedVoice,
+    browserVoices, edgeVoices, edgeTried, edgeOk, selectedVoice, setSelectedVoice,
     playbackSpeed, cyclePlaybackSpeed,
     autoNarrate, setAutoNarrate,
     isTTSLoading, isSpeaking, isPaused, lastSpeech, setLastSpeech,
@@ -201,6 +201,8 @@ export default function App() {
   // Set when a reset link arrived but couldn't be exchanged, so the auth modal
   // can explain itself instead of showing a form that cannot succeed.
   const [recoveryExpired, setRecoveryExpired] = useState(false);
+  // Mirrors React Flow's interactivity lock (the padlock control).
+  const [canvasInteractive, setCanvasInteractive] = useState(true);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   // Collapsible audio panels — collapsed by default so the tutor response area stays clean
@@ -1336,7 +1338,27 @@ export default function App() {
           className="bg-app"
         >
           <Background color={canvasInk} gap={24} size={1.5} />
-          <Controls position="top-left" className="!m-3 sm:!ml-[424px]" />
+          {/* onInteractiveChange is a Controls prop, not a ReactFlow one: it
+              fires when the padlock toggles. Without it the only feedback was
+              the icon, and a locked canvas made selection silently do nothing
+              — which takes the node toolbar and the chat quick actions with it. */}
+          <Controls
+            position="top-left"
+            className="!m-3 sm:!ml-[424px]"
+            onInteractiveChange={setCanvasInteractive}
+          />
+
+          {/* Lock state for the controls' interactivity toggle. Selection-binding
+              hangs the node toolbar and the chat panel's quick actions off it, so
+              a silent lock reads as a broken canvas. */}
+          {!canvasInteractive && (
+            <Panel position="top-center" className="pointer-events-none mt-4">
+              <div className="flex items-center gap-2 rounded-full bg-surface border border-accent-line px-3.5 py-1.5 text-[11px] font-semibold text-accent-text shadow-lg">
+                <Lock size={12} />
+                Canvas locked — unlock to move, connect, or select nodes
+              </div>
+            </Panel>
+          )}
 
           {/* Collapsible Canvas Radar Minimap — bottom-right, parked clearly above action bar */}
           {showMinimap && (
@@ -1663,16 +1685,25 @@ export default function App() {
               >
                 <Mic size={12} className="text-accent-text" /> Voice
                 <span className="ml-2 text-[10px] font-medium text-fg-subtle">
-                  {edgeVoices.length
+                  {edgeOk
                     ? `${edgeVoices.length} voices`
-                    : browserVoices.length
-                      ? `${browserVoices.length} offline`
+                    : edgeTried
+                      ? "tutor offline"
                       : "loading…"}{autoNarrate ? " · auto" : ""}
                 </span>
                 <ChevronDown size={13} className={`ml-auto text-fg-subtle transition-transform ${voiceOpen ? "rotate-180" : ""}`} />
               </button>
               {voiceOpen && (
               <div id="voice-panel" className="px-3 pb-3">
+              {!edgeOk && edgeTried && (
+                <div role="status" className="mb-2 flex items-start gap-1.5 rounded-lg bg-warn-soft border border-warn-line px-2.5 py-1.5">
+                  <AlertTriangle size={12} className="text-warn-fg shrink-0 mt-px" />
+                  <p className="text-[10px] leading-relaxed text-warn-fg">
+                    Narration voices are unreachable, so these are your device&apos;s
+                    built-in voices. They sound noticeably more robotic.
+                  </p>
+                </div>
+              )}
               <VoiceSelect
                 edgeVoices={edgeVoices}
                 browserVoices={browserVoices}
@@ -2093,6 +2124,7 @@ export default function App() {
             open={authModalOpen}
             initialMode={authModalMode}
             expiredRecovery={recoveryExpired}
+            onExpiredRecoveryCleared={() => setRecoveryExpired(false)}
             onClose={() => { setAuthModalOpen(false); setAuthModalMode(null); setRecoveryExpired(false); }}
             onLoginWithGoogle={loginWithGoogle}
             onLoginWithPassword={loginWithPassword}

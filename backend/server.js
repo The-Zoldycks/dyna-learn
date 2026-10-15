@@ -605,8 +605,8 @@ const CURATED_EDGE_VOICES = [
   { id: "en-GB-SoniaNeural",      label: "Sonia — British female · soft",         gender: "Female", lang: "en-GB" },
   { id: "en-GB-LibbyNeural",      label: "Libby — British female · measured",     gender: "Female", lang: "en-GB" },
   // Nigerian English — exists on the same free tier
-  { id: "en-NG-AbeoNeural",       label: "Abeo — Nigerian male",                  gender: "Male",   lang: "en-NG" },
-  { id: "en-NG-EzinneNeural",     label: "Ezinne — Nigerian female",              gender: "Female", lang: "en-NG" },
+  { id: "en-NG-AbeoNeural",       label: "Abeo — Nigerian male · steady",           gender: "Male",   lang: "en-NG" },
+  { id: "en-NG-EzinneNeural",     label: "Ezinne — Nigerian female · clear",        gender: "Female", lang: "en-NG" },
 ];
 const CURATED_EDGE_IDS = new Set(CURATED_EDGE_VOICES.map((v) => v.id));
 

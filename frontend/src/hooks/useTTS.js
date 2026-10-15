@@ -17,6 +17,13 @@ function readLS(key, fallback) {
 export function useTTS(apiBase) {
   const [browserVoices, setBrowserVoices] = useState([]);
   const [edgeVoices, setEdgeVoices] = useState([]);
+  // true once we have actually heard back from /api/tts/voices, whether that
+  // answer was a list or a failure. Without it "Edge unavailable" is
+  // indistinguishable from "still loading", so a stale or down backend would
+  // silently degrade to the robotic system voices with nothing on screen to
+  // say so.
+  const [edgeTried, setEdgeTried] = useState(false);
+  const [edgeOk, setEdgeOk] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState(
     () => readLS("dyna-voice", "en-US-AvaNeural")
   );
@@ -53,7 +60,9 @@ export function useTTS(apiBase) {
       .then((r) => r.json())
       .then((data) => {
         const list = data.voices;
+        setEdgeTried(true);
         if (!list?.length) return;
+        setEdgeOk(true);
         setEdgeVoices(list);
         // The curated list is deliberately small, so a previously-stored voice
         // may not exist in it any more. Without this the picker would show
@@ -63,7 +72,11 @@ export function useTTS(apiBase) {
           list.some((v) => v.id === cur) ? cur : list[0].id
         );
       })
-      .catch((err) => { if (err?.name !== "AbortError") console.warn("Edge voices unavailable, using browser voices:", err.message); });
+      .catch((err) => {
+        setEdgeTried(true);
+        setEdgeOk(false);
+        if (err?.name !== "AbortError") console.warn("[tts] Edge voices unavailable, falling back to browser speech synthesis:", err.message);
+      });
 
     const loadVoices = () => {
       const voices = window.speechSynthesis?.getVoices() || [];
@@ -223,6 +236,9 @@ export function useTTS(apiBase) {
 
   return {
     browserVoices, edgeVoices, selectedVoice, setSelectedVoice,
+    // edgeTried/edgeOk let the caller say *why* the list is the system one,
+    // instead of a silently degraded dropdown.
+    edgeTried, edgeOk,
     playbackSpeed, cyclePlaybackSpeed,
     autoNarrate, setAutoNarrate: setAutoNarratePersisted,
     isTTSLoading, isSpeaking, isPaused, lastSpeech, setLastSpeech,
