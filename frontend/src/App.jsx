@@ -11,7 +11,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  Send, Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
+  Loader2, Volume2, Sparkles, Trash2, MousePointerClick,
   ChevronUp, ChevronDown, Mic,
   MessageSquare, Network, Download, Save, BookOpen, Image, XCircle, Brain, Compass, Map, Search, Droplets, FolderKanban,
   Target, Lightbulb, Sprout, AlertTriangle, Trophy, Dumbbell, MoreHorizontal, Moon, Sun, Lock,
@@ -24,6 +24,8 @@ import SimpleMarkdown from "./components/SimpleMarkdown.jsx";
 import QuizCard from "./components/QuizCard.jsx";
 import UserMenu from "./components/UserMenu.jsx";
 import VoiceSelect from "./components/VoiceSelect.jsx";
+import PromptBar from "./components/PromptBar.jsx";
+import "./components/PromptBar.css";
 const JournalModal = lazy(() => import("./components/JournalModal.jsx"));
 const TopicExplorerModal = lazy(() => import("./components/TopicExplorerModal.jsx"));
 const FlashcardPracticeModal = lazy(() => import("./components/FlashcardPracticeModal.jsx"));
@@ -150,7 +152,6 @@ export default function App() {
   // Restore canvas + chat from sessionStorage on first mount
   const [nodes, setNodes, onNodesChange] = useNodesState(sessionRead(SESSION_NODES, initialNodes));
   const [edges, setEdges, onEdgesChange] = useEdgesState(sessionRead(SESSION_EDGES, initialEdges));
-  const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Unified speech (Edge Neural + browser fallback) — extracted hook
@@ -186,7 +187,6 @@ export default function App() {
       return true;
     }
   });
-  const [isListening, setIsListening] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
   const [topicExplorerOpen, setTopicExplorerOpen] = useState(false);
   const [practiceModalOpen, setPracticeModalOpen] = useState(false);
@@ -236,6 +236,12 @@ export default function App() {
   const moreMenuRef = useRef(null);
 
   const lastPayloadRef = useRef(null);
+  // Abort wiring for the PromptBar trial's stop button: executeTutor's fetch
+  // previously used an untouchable AbortSignal.timeout, so "stop" would have
+  // been a fake button. userAbortRef distinguishes a deliberate stop (quiet
+  // info toast) from a real timeout (error toast + offline banner).
+  const tutorAbortRef = useRef(null);
+  const userAbortRef = useRef(false);
   const reactFlowInstanceRef = useRef(null); // imperative fitView
   const chatBottomRef = useRef(null);         // auto-scroll sentinel
   const nodesRef = useRef(null);
@@ -427,27 +433,28 @@ export default function App() {
     setSelectedNodeId((cur) => (deletedIds.has(cur) ? null : cur));
   }, [setEdges]);
 
+  const [prefill, setPrefill] = useState(null);
+  const fillComposer = useCallback((text) => {
+    setPrefill({ text, nonce: Date.now() });
+    setTimeout(() => {
+      const textarea = document.querySelector("textarea");
+      if (textarea) textarea.focus();
+    }, 50);
+  }, []);
+
   // ---- Custom Node Toolbar 'Ask AI', 'Branch out', and 'Delete' listeners ----
   useEffect(() => {
     const handleAskNode = (e) => {
       const { id, label } = e.detail || {};
       if (id) setSelectedNodeId(id);
-      setQuestion(`Explain "${label}" in more detail.`);
+      fillComposer(`Explain "${label}" in more detail.`);
       setMobileTab("chat"); // ensure we switch to chat on mobile
-      setTimeout(() => {
-        const textarea = document.querySelector("textarea");
-        if (textarea) textarea.focus();
-      }, 50);
     };
     const handleBranchNode = (e) => {
       const { id, label } = e.detail || {};
       if (id) setSelectedNodeId(id);
-      setQuestion(`Break down "${label}" into sub-concepts and expand the diagram.`);
+      fillComposer(`Break down "${label}" into sub-concepts and expand the diagram.`);
       setMobileTab("chat");
-      setTimeout(() => {
-        const textarea = document.querySelector("textarea");
-        if (textarea) textarea.focus();
-      }, 50);
     };
     const handleDeleteNode = (e) => {
       const { id, label } = e.detail;
@@ -464,7 +471,7 @@ export default function App() {
       window.removeEventListener("branch-node", handleBranchNode);
       window.removeEventListener("delete-node", handleDeleteNode);
     };
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, fillComposer]);
 
   // ---- Header "More" overflow menu: close on outside click / Escape ----
   useEffect(() => {
@@ -812,6 +819,9 @@ export default function App() {
   // ---- Main tutor call ----
   const executeTutor = useCallback(async (payload, _retryLabel) => {
     setLoading(true); lastPayloadRef.current = payload;
+    userAbortRef.current = false;
+    const ctrl = new AbortController();
+    tutorAbortRef.current = ctrl;
     try {
       const token = getAccessToken();
       const res = await fetch(`${API_BASE}/api/tutor`, {
@@ -821,7 +831,9 @@ export default function App() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(90000),
+        signal: typeof AbortSignal.any === "function"
+          ? AbortSignal.any([ctrl.signal, AbortSignal.timeout(90000)])
+          : ctrl.signal,
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -873,6 +885,12 @@ export default function App() {
       return true;
     } catch (err) {
       console.error(err);
+      // Deliberate stop via the PromptBar stop tile: quiet exit, no error
+      // toast and no offline banner.
+      if (userAbortRef.current) {
+        toast.info("Stopped", { description: "Tutor request cancelled." });
+        return false;
+      }
       const code = err.code || "";
       const isRateLimit =
         code === "GEMINI_RATE_LIMIT" || code === "TUTOR_RATE_LIMIT" || code === "GUEST_DAILY_LIMIT" || code === "TTS_RATE_LIMIT" || code === "TTS_CONCURRENCY_LIMIT" ||
@@ -916,19 +934,27 @@ export default function App() {
         cancel: { label: "Dismiss", onClick: () => toast.dismiss("tutor-error") },
       });
       return false;
-    } finally { setLoading(false); }
+    } finally { tutorAbortRef.current = null; setLoading(false); }
   }, [speakText, setLastSpeech, applyDiagramUpdateStable, autoNarrate, triggerIdleAutoSave, setIsOffline]);
 
-  // ---- Form submit ----
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if ((!question.trim() && !selectedImage) || loading) return;
+  // ---- PromptBar trial: submit path -------------------------------------
+  // submitPromptText takes the text as a parameter because the PromptBar owns
+  // its draft internally (the old form read the `question` state). Abort +
+  // one-shot dictate exist so the stop tile and mic are real, not decorative.
+  const abortTutor = useCallback(() => {
+    userAbortRef.current = true;
+    try { tutorAbortRef.current?.abort(); } catch {}
+  }, []);
+
+  const submitPromptText = useCallback(async (text) => {
+    const q = (text ?? "").trim();
+    if ((!q && !selectedImage) || loading) return;
     if (isOffline) {
       toast.error("You're offline", { description: "Reconnect to the internet before asking the tutor." });
       return;
     }
     const canvasState = { nodes, edges };
-    
+
     // Strip image dataUrl from previous turns to save tokens and payload size
     const cleanHistory = chatHistory.map(turn => {
       if (!turn.image) return turn;
@@ -937,7 +963,7 @@ export default function App() {
     });
 
     const payload = {
-      studentQuestion: question.trim() || "What's in this image?",
+      studentQuestion: q || "What's in this image?",
       canvasState,
       flowchartState: canvasState, // legacy compat
       chatHistory: cleanHistory,
@@ -946,10 +972,63 @@ export default function App() {
     };
     const ok = await executeTutor(payload);
     if (ok) {
-      setQuestion("");
       clearImage();
     }
-  };
+  }, [nodes, edges, chatHistory, selectedNodeId, selectedImage, loading, isOffline, executeTutor, clearImage]);
+
+  // One-shot dictation returning a transcript promise, matching PromptBar's
+  // onDictate contract. Replaces the old tap-to-toggle mic for the trial.
+  const dictateOnce = useCallback(() => new Promise((resolve, reject) => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      toast.error("Voice input not supported in this browser.");
+      reject(new Error("unsupported"));
+      return;
+    }
+    if (loading) { reject(new Error("busy")); return; }
+    let settled = false;
+    const rec = new SR();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onresult = (event) => {
+      if (settled) return;
+      settled = true;
+      resolve(event.results?.[0]?.[0]?.transcript || "");
+      try { rec.stop(); } catch {}
+    };
+    rec.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      console.error("Speech recognition error", event.error);
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        toast.error("Microphone blocked", { description: "Allow microphone access in your browser settings." });
+      } else if (event.error === "network") {
+        toast.error("Voice input unavailable", { description: "Speech recognition needs an internet connection." });
+      }
+      reject(new Error(event.error || "dictation failed"));
+    };
+    rec.onend = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("no speech"));
+    };
+    try {
+      rec.start();
+    } catch (err) {
+      settled = true;
+      console.error("Speech recognition start failed:", err);
+      toast.error("Voice input failed to start", { description: "Try again, or type your question." });
+      reject(err);
+    }
+  }), [loading]);
+
+  const promptSources = useMemo(() => ([
+    { key: "image", name: "Attach image", description: "PNG, JPG, WebP · under 5MB", icon: <Image size={15} />, attach: true },
+  ]), []);
+  const pbBg = useToken("--neu-bg", "#eef0f4");
+  const pbInk = useToken("--fg", "#0f172a");
+  const pbMenu = useToken("--surface", "#ffffff");
+  const pbSpark = useToken("--accent", "#7c3aed");
 
   const handleClear = () => {
     clearImage();
@@ -1046,53 +1125,6 @@ export default function App() {
     try { recognitionRef.current?.abort(); } catch {}
     recognitionRef.current = null;
   }, []);
-
-  // ---- Voice Input (tap-to-toggle with auto-append) ---------------------
-  const toggleVoice = useCallback((e) => {
-    e.preventDefault();
-    if (loading) return;
-    if (isListening) {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      setIsListening(false);
-      return;
-    }
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      toast.error("Voice input not supported in this browser.");
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (event) => {
-      const transcript = event.results?.[0]?.[0]?.transcript || "";
-      if (transcript) {
-        setQuestion((prev) => (prev ? `${prev.trim()} ${transcript}` : transcript));
-      }
-    };
-    recognition.onerror = (event) => {
-      console.error("Speech recognition error", event.error);
-      setIsListening(false);
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        toast.error("Microphone blocked", { description: "Allow microphone access in your browser settings." });
-      } else if (event.error === "network") {
-        toast.error("Voice input unavailable", { description: "Speech recognition needs an internet connection." });
-      }
-    };
-    recognition.onend = () => setIsListening(false);
-    
-    recognitionRef.current = recognition;
-    try {
-      recognition.start();
-    } catch (err) {
-      console.error("Speech recognition start failed:", err);
-      toast.error("Voice input failed to start", { description: "Try again, or type your question." });
-      recognitionRef.current = null;
-      setIsListening(false);
-    }
-  }, [loading, isListening]);
 
   // ---- Image attachment handlers come from useImageAttachment ----
 
@@ -1242,7 +1274,7 @@ export default function App() {
     setEdges(layouted.edges);
     setChatHistory([]);
     setSelectedNodeId(null);
-    setQuestion(topic.prompt);
+    fillComposer(topic.prompt);
     toast.success(`Loaded "${topic.title}"`, { description: "Tutor is starting the lesson..." });
     setTimeout(() => {
       triggerFitView();
@@ -1253,7 +1285,7 @@ export default function App() {
         selectedNodeId: null,
       });
     }, 250);
-  }, [setNodes, setEdges, triggerFitView, executeTutor, loading, isOffline]);
+  }, [setNodes, setEdges, triggerFitView, executeTutor, loading, isOffline, fillComposer]);
 
   const handleStartPractice = useCallback((items) => {
     setJournalOpen(false);
@@ -1626,8 +1658,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setQuestion(`Explain "${selectedNodeLabel}" in depth and how it works.`);
-                      document.querySelector("textarea")?.focus();
+                      fillComposer(`Explain "${selectedNodeLabel}" in depth and how it works.`);
                     }}
                     className="neu-press text-[11px] font-medium text-fg-muted hover:text-accent-text px-2.5 py-1 rounded-md inline-flex items-center gap-1 min-h-[44px]"
                   >
@@ -1636,8 +1667,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setQuestion(`Break down "${selectedNodeLabel}" into sub-concepts on the canvas.`);
-                      document.querySelector("textarea")?.focus();
+                      fillComposer(`Break down "${selectedNodeLabel}" into sub-concepts on the canvas.`);
                     }}
                     className="neu-press text-[11px] font-medium text-fg-muted hover:text-accent-text px-2.5 py-1 rounded-md inline-flex items-center gap-1 min-h-[44px]"
                   >
@@ -1646,8 +1676,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setQuestion(`Quiz me on "${selectedNodeLabel}".`);
-                      document.querySelector("textarea")?.focus();
+                      fillComposer(`Quiz me on "${selectedNodeLabel}".`);
                     }}
                     className="neu-press text-[11px] font-medium text-fg-muted hover:text-accent-text px-2.5 py-1 rounded-md inline-flex items-center gap-1 min-h-[44px]"
                   >
@@ -1656,8 +1685,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      setQuestion(`Give a real-world analogy or example for "${selectedNodeLabel}".`);
-                      document.querySelector("textarea")?.focus();
+                      fillComposer(`Give a real-world analogy or example for "${selectedNodeLabel}".`);
                     }}
                     className="neu-press text-[11px] font-medium text-fg-muted hover:text-accent-text px-2.5 py-1 rounded-md inline-flex items-center gap-1 min-h-[44px]"
                   >
@@ -1755,21 +1783,21 @@ export default function App() {
                     <Compass size={13} /> Topic Starters
                   </button>
                   <button
-                    onClick={() => { setQuestion("Explain Database Normalization (1NF to BCNF)."); }}
+                    onClick={() => { fillComposer("Explain Database Normalization (1NF to BCNF)."); }}
                     className="rise-in neu-raised px-3.5 py-2 rounded-full text-xs font-medium text-fg-muted hover:text-accent-text min-h-[44px]"
                     style={{ animationDelay: "60ms" }}
                   >
                     Database Normalization
                   </button>
                   <button
-                    onClick={() => { setQuestion("How does OAuth 2.0 work?"); }}
+                    onClick={() => { fillComposer("How does OAuth 2.0 work?"); }}
                     className="rise-in neu-raised px-3.5 py-2 rounded-full text-xs font-medium text-fg-muted hover:text-accent-text min-h-[44px]"
                     style={{ animationDelay: "120ms" }}
                   >
                     OAuth 2.0 Auth Code Flow
                   </button>
                   <button
-                    onClick={() => { setQuestion("Draw a flowchart for the React Component Lifecycle."); }}
+                    onClick={() => { fillComposer("Draw a flowchart for the React Component Lifecycle."); }}
                     className="rise-in neu-raised px-3.5 py-2 rounded-full text-xs font-medium text-fg-muted hover:text-accent-text min-h-[44px]"
                     style={{ animationDelay: "180ms" }}
                   >
@@ -1868,9 +1896,8 @@ export default function App() {
 
           {/* Fixed bottom area: Form & Mini-player */}
           <div className="p-4 shrink-0 flex flex-col gap-3">
-            {/* Question form — unified composer card */}
-            <form
-              onSubmit={handleSubmit}
+            {/* Question composer — PromptBar trial (models/efforts off; attach + dictate wired to existing flows) */}
+            <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
@@ -1899,68 +1926,9 @@ export default function App() {
                 </div>
               )}
 
-              <textarea
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                onPaste={handlePaste}
-                onKeyDown={(e) => {
-                  // Ctrl+Enter (or Cmd+Enter on Mac) submits
-                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !loading && (question.trim() || selectedImage)) {
-                    e.preventDefault();
-                    handleSubmit(e);
-                  }
-                }}
-                placeholder={
-                  selectedNodeId
-                    ? `Ask about "${selectedNodeLabel}"… (Ctrl+Enter to send)`
-                    : "e.g. Explain database normalization… (Ctrl+Enter to send)"
-                }
-                rows={3}
-                disabled={loading || isOffline}
-                aria-disabled={loading || isOffline}
-                aria-label="Ask the tutor a question"
-                aria-describedby={loading ? "submit-hint-loading" : isOffline ? "submit-hint-offline" : undefined}
-                className="w-full bg-transparent px-4 pt-3 text-sm placeholder:text-fg-subtle focus:outline-none resize-none disabled:opacity-60 disabled:cursor-not-allowed"
-              />
-              {/* Composer footer toolbar */}
-              <div className="flex items-center gap-1.5 px-3 pb-3">
-                <input
-                  type="file"
-                  accept="image/*"
-                  ref={fileInputRef}
-                  onChange={handleImageChange}
-                  aria-label="Upload an image to analyze"
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={loading}
-                  aria-label="Upload image"
-                  title="Upload image (max 5MB)"
-                  className="neu-press flex-none flex items-center justify-center w-10 h-10 rounded-xl text-fg-subtle disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Image size={18} aria-hidden="true" />
-                </button>
-                {(window.SpeechRecognition || window.webkitSpeechRecognition) && (
-                  <button
-                    type="button"
-                    onClick={toggleVoice}
-                    disabled={loading}
-                    aria-label={isListening ? "Listening… click to stop" : "Click to dictate"}
-                    title={isListening ? "Click to stop dictation" : "Click to dictate"}
-                    aria-pressed={isListening}
-                    className={`flex-none flex items-center justify-center w-10 h-10 rounded-xl transition ${
-                      isListening
-                        ? "bg-danger-fg text-app animate-pulse"
-                        : "neu-press text-fg-subtle"
-                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                  >
-                    <Mic size={18} />
-                  </button>
-                )}
-                {selectedNodeId && (
-                  <span className="hidden sm:inline-flex items-center gap-1.5 ml-1 px-2.5 py-1.5 rounded-full bg-accent-soft border border-accent-line text-[11px] font-semibold text-accent-text max-w-[180px]">
+              {selectedNodeId && (
+                <div className="px-4 pt-3">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-accent-soft border border-accent-line text-[11px] font-semibold text-accent-text max-w-full">
                     <span className="truncate">{selectedNodeLabel}</span>
                     <button
                       type="button"
@@ -1971,17 +1939,47 @@ export default function App() {
                       <XCircle size={12} />
                     </button>
                   </span>
-                )}
-                <button
-                  type="submit"
-                  disabled={loading || isOffline || (!question.trim() && !selectedImage)}
-                  aria-label={loading ? "Adapting diagram" : "Send your question to the tutor"}
-                  className="ml-auto flex-none flex items-center justify-center w-10 h-10 rounded-full bg-accent text-accent-fg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-sm"
-                >
-                  {loading
-                    ? <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                    : <Send size={16} aria-hidden="true" />}
-                </button>
+                </div>
+              )}
+              {/* Composer toolbar is PromptBar itself: attach opens the existing
+                  file picker (preview row above shows the image, so no chips),
+                  mic is one-shot dictation, send tile morphs to stop while busy. */}
+              <input
+                type="file"
+                accept="image/*"
+                ref={fileInputRef}
+                onChange={handleImageChange}
+                aria-label="Upload an image to analyze"
+                className="hidden"
+              />
+              <div className="p-1">
+                <PromptBar
+                  placeholder={
+                    selectedNodeId
+                      ? `Ask about "${selectedNodeLabel}"… (Enter to send)`
+                      : "e.g. Explain database normalization… (Enter to send)"
+                  }
+                  sources={promptSources}
+                  commands={[]}
+                  models={[]}
+                  efforts={[]}
+                  busy={loading}
+                  onSend={(text) => submitPromptText(text)}
+                  onStop={abortTutor}
+                  onAttach={() => { fileInputRef.current?.click(); return []; }}
+                  onDictate={(window.SpeechRecognition || window.webkitSpeechRecognition) ? dictateOnce : undefined}
+                  inputAriaLabel="Ask the tutor a question"
+                  onPaste={handlePaste}
+                  disabled={loading || isOffline}
+                  prefill={prefill}
+                  background={pbBg}
+                  color={pbInk}
+                  menuBackground={pbMenu}
+                  sparkColor={pbSpark}
+                  width={400}
+                  radius={16}
+                  maxRows={5}
+                />
               </div>
               {loading && (
                 <p id="submit-hint-loading" className="text-xs text-center text-accent-text flex items-center justify-center gap-1.5 pb-2">
@@ -1995,7 +1993,7 @@ export default function App() {
                   You're offline — reconnect to send a message
                 </p>
               )}
-            </form>
+            </div>
 
 
             {/* Last-speech mini-player — collapsible, collapsed by default */}
